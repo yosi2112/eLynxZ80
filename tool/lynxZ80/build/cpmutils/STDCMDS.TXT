@@ -1,0 +1,16 @@
+Place original CP/M 2.2 transient command .COM files here if available:
+
+  ASM.COM
+  DDT.COM
+  DUMP.COM
+  ED.COM
+  LOAD.COM
+  PIP.COM
+  STAT.COM
+  SUBMIT.COM
+  XSUB.COM
+
+build_cpm_utils.ps1 imports any .COM files found in this directory after
+assembling the local Lynx utilities. Files in this directory override local
+compatibility utilities with the same CP/M name.
+
