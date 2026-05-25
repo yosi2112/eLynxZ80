@@ -1,6 +1,6 @@
 # Lynx Emulator 'eLynxZ80' on Common Source Code Project
 
-Kodita de Yosi per OpenAI Codex  
+yosi kun OpenAI Codex  
 Versio 1.0 Beta 1(260521)
 
 ## 1. Kio estas tio?
@@ -94,6 +94,15 @@ Helpaj skriptoj troviĝas sub `tool/lynxZ80`.
 | `build_subcpu_rom.ps1` | Generas `src/vm/Lynxz80/build/SUBCPU.ROM`. |
 | `build_fontrom.ps1` | Generas `src/vm/Lynxz80/build/font/FONT.ROM`. |
 | `ROMCPY.ps1` | Kopias generitajn ROMojn al `vc++2017/bin/x86/Debug` aŭ `vc++2017/bin/x86/Release`. |
+
+Generado de la tipara ROM aparte bezonas `KH-Dot-Dougenzaka-16.ttf`. Tiu deponejo ne redistribuas la tiparan dosieron nek generitajn tipar-ROM-datumojn. Por konstrui la tiparan ROMon, elŝutu `KH-Dot-Dougenzaka-16.ttf` aparte de ĝia distribuopaĝo kaj metu ĝin sub `tool/lynxZ80/build/font`, aŭ donu ĝian lokon al `build_fontrom.ps1` per `-FontPath`.
+
+`KH-Dot-Dougenzaka-16.ttf` estas aparte licencita laŭ la SIL Open Font License 1.1. Generitaj tipar-ROM-datumoj derivitaj de tiu tiparo estu traktataj laŭ la sama permesilo kiam redistribuitaj.
+
+La tiparo estas akirebla de la jenaj paĝoj.
+
+- [KH Dot Font Series](http://jikasei.me/font/kh-dotfont/)
+- [KH Dot Font - Font Meme](https://fontmeme.com/fonts/kh-dot-font/)
 
 Por generi la CP/M 2.2-diskon, ankaŭ necesas `cpm2-asm.zip` kaj `cpm22-b.zip`. Metu tiujn dosierojn en `tool/lynxZ80/build/arch`.
 
