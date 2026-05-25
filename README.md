@@ -1,6 +1,6 @@
 # Lynx Emulator 'eLynxZ80' on Common Source Code Project
 
-yosi with OpenAI Codex  
+yosi coding with OpenAI Codex  
 Version 1.0 Beta 1(260521)
 
 ## 1. これはなに？
