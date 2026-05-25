@@ -8,6 +8,13 @@ $p2bin = 'p2bin.exe'
 $cpmSource = Join-Path $root 'build\cpm22disk\CPM22_z80.ASM'
 $runtimeSource = Join-Path $root 'build\bios\cpm22bios_runtime.asm'
 $buildDir = Join-Path $root 'build'
+$archiveDir = Join-Path $toolRoot 'build\arch'
+$cpmSourceArchive = Join-Path $archiveDir 'cpm2-asm.zip'
+$stdCommandArchive = Join-Path $archiveDir 'cpm22-b.zip'
+$cpmExtractDir = Join-Path $buildDir 'cpm2-asm'
+$stdCommandExtractDir = Join-Path (Join-Path $toolRoot 'build') 'cpm22-b'
+$mnemonicConverter = Join-Path $toolRoot 'correct_nmemonic.ps1'
+$converterWorkDir = Join-Path $toolRoot 'build\cpm22disk'
 $outDir = $buildDir
 $stage = Join-Path $buildDir ("cpm22disk")
 $imgOut = Join-Path $outDir 'CPM22_SYSTEM.IMG'
@@ -60,11 +67,88 @@ function Find-BytePattern {
     return -1
 }
 
-foreach($tool in @($asw, $p2bin)) {
-    if(!(Test-Path -LiteralPath $tool)) {
-        throw "Required tool not found: $tool"
+function Resolve-RequiredTool {
+    param(
+        [string]$ToolName
+    )
+
+    $command = Get-Command $ToolName -ErrorAction SilentlyContinue
+    if($null -eq $command) {
+        throw "Required tool not found on PATH: $ToolName"
+    }
+    return $command.Source
+}
+
+function Expand-RequiredArchive {
+    param(
+        [string]$ArchivePath,
+        [string]$DestinationPath
+    )
+
+    if(!(Test-Path -LiteralPath $ArchivePath -PathType Leaf)) {
+        throw "Required archive not found: $ArchivePath"
+    }
+    if(Test-Path -LiteralPath $DestinationPath) {
+        $existing = Get-ChildItem -LiteralPath $DestinationPath -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if($null -ne $existing) {
+            return
+        }
+    }
+
+    New-Item -ItemType Directory -Force -Path $DestinationPath | Out-Null
+    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $DestinationPath -Force
+    Write-Host "Extracted $ArchivePath to $DestinationPath"
+}
+
+function Ensure-CpmSource {
+    if(Test-Path -LiteralPath $cpmSource -PathType Leaf) {
+        return
+    }
+
+    Expand-RequiredArchive -ArchivePath $cpmSourceArchive -DestinationPath $cpmExtractDir
+
+    $sourceCandidates = @('CPM22.Z80', 'CPM22_z80.ASM', 'CPM22.ASM')
+    $source = $null
+    foreach($name in $sourceCandidates) {
+        $source = Get-ChildItem -LiteralPath $cpmExtractDir -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ieq $name } |
+            Select-Object -First 1
+        if($null -ne $source) {
+            break
+        }
+    }
+    if($null -eq $source) {
+        throw "CP/M 2.2 source was not found in $cpmSourceArchive"
+    }
+
+    New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    if($source.Name -ieq 'CPM22.Z80') {
+        if(!(Test-Path -LiteralPath $mnemonicConverter -PathType Leaf)) {
+            throw "Required converter not found: $mnemonicConverter"
+        }
+        New-Item -ItemType Directory -Force -Path $converterWorkDir | Out-Null
+        Copy-Item -LiteralPath $source.FullName -Destination (Join-Path $converterWorkDir 'CPM22.Z80') -Force
+        & powershell -ExecutionPolicy Bypass -File $mnemonicConverter
+        if($LASTEXITCODE -ne 0) {
+            throw "CP/M mnemonic conversion failed with exit code $LASTEXITCODE"
+        }
+        Copy-Item -LiteralPath (Join-Path $converterWorkDir 'CPM22_z80.ASM') -Destination $cpmSource -Force
+        Write-Host "Prepared $cpmSource with $mnemonicConverter"
+    } else {
+        Copy-Item -LiteralPath $source.FullName -Destination $cpmSource -Force
+        Write-Host "Prepared $cpmSource from $($source.FullName)"
     }
 }
+
+function Ensure-StandardCommands {
+    Expand-RequiredArchive -ArchivePath $stdCommandArchive -DestinationPath $stdCommandExtractDir
+}
+
+$asw = Resolve-RequiredTool $asw
+$p2bin = Resolve-RequiredTool $p2bin
+Ensure-CpmSource
+Ensure-StandardCommands
+
 foreach($src in @($cpmSource, $runtimeSource)) {
     if(!(Test-Path -LiteralPath $src)) {
         throw "Required source not found: $src"
