@@ -129,14 +129,18 @@ BIOS_CONIN_WAIT:
 
 BIOS_CONOUT:
         PUSH    BC
-        LD      B,C
-BIOS_CONOUT_WAIT:
+        LD      A,C
+        LD      B,A
+        CALL    BIOS_CONOUT_SEND_B
+        POP     BC
+        RET
+
+BIOS_CONOUT_SEND_B:
         IN      A,(MINSUB_PORT)
         AND     MINSUB_DR_FULL+MINSUB_SUB_BUSY
-        JR      NZ,BIOS_CONOUT_WAIT
+        JR      NZ,BIOS_CONOUT_SEND_B
         LD      A,B
         OUT     (MINSUB_PORT),A
-        POP     BC
         RET
 
 BIOS_PRINT_STRING:

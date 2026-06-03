@@ -214,6 +214,10 @@ handle_char:
         JP      Z,handle_bs
         CP      009H
         JP      Z,handle_tab
+        CP      00EH
+        JP      Z,ansi_sgr_font1
+        CP      00FH
+        JP      Z,ansi_sgr_font0
         CP      020H
         RET     C
         LD      (CHAR_LATCH),A
