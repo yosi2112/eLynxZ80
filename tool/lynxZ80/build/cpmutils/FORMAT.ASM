@@ -1,27 +1,38 @@
 ; Lynx-Z80 CP/M 2.2 FORMAT.COM
-; Optimized for Z80 (MacroAssembler AS)
+; Rewritten against Lynx-Z80 floppy I/F and MB8877 behavior.
 
         CPU     Z80
 
 BDOS    EQU     0005H
+WBOOT   EQU     0000H
 CONOUT  EQU     0002H
 PRINT   EQU     0009H
 RDCON   EQU     0001H
 
-SETTRK  EQU     0F21EH
-SELDSK  EQU     0F21BH
-SETSEC  EQU     0F221H
-SETDMA  EQU     0F224H
-WRITE   EQU     0F22AH
-WBOOT   EQU     0000H
+FDCSTS  EQU     02CH
+FDCCMD  EQU     02CH
+FDCTRK  EQU     02DH
+FDCSEC  EQU     02EH
+FDCDAT  EQU     02FH
+PIOBD   EQU     031H
+PIOAC   EQU     032H
+PIOBC   EQU     033H
 
 FIRSTTRK EQU    2
 DATATRK  EQU    0
 LASTTRK  EQU    76
 LASTSEC  EQU    26
-MAXDRV   EQU    4
+MAXDRV   EQU    2
+SECSIZE  EQU     128
+
+GAP4     EQU     40
+GAP1     EQU     6
+GAP2     EQU     11
+GAP3     EQU     16
+
 CR       EQU     0DH
 LF       EQU     0AH
+ESC      EQU     1BH
 TAB      EQU     09H
 
 ARGCNT   EQU     0080H
@@ -31,28 +42,93 @@ ARGPTR   EQU     0081H
 
 START:
         CALL    PARSEARG
-        LD      DE, MSG_HELLO
-        LD      C, PRINT
-        CALL    BDOS
         LD      A, (MODE)
         OR      A
-        JR      NZ, GOTMODE_OK
-        LD      DE, MSG_SELECT
-        LD      C, PRINT
-        CALL    BDOS
-        CALL    GETMODE
-GOTMODE_OK:
+        CALL    Z, MENU
+        LD      A, (MODE)
         CP      'S'
-        JP      Z, MODE_SYSTEM
+        JR      Z, MODE_SYSTEM
         CP      'D'
-        JP      Z, MODE_DATA
+        JR      Z, MODE_DATA
         JP      EXIT
+
+MODE_SYSTEM:
+        LD      A, FIRSTTRK
+        LD      (STARTTRK), A
+        JR      CONFIRM
+
+MODE_DATA:
+        LD      A, DATATRK
+        LD      (STARTTRK), A
+
+CONFIRM:
+        CALL    DRAW_CONFIRM
+        LD      A, (AUTO)
+        OR      A
+        JR      NZ, DO_FORMAT
+        CALL    GETKEY_UP
+        CP      'Y'
+        JP      NZ, EXIT
+
+DO_FORMAT:
+        CALL    DRAW_WORK
+        CALL    HW_INIT
+        CALL    CHECK_READY
+        JP      NZ, FERR
+
+        XOR     A
+        LD      (TRACK), A
+        CALL    SEEK_TRACK
+        JP      NZ, FERR
+
+        LD      A, (STARTTRK)
+        LD      (TRACK), A
+
+TRACK_LOOP:
+        CALL    SHOW_TRACK_BEGIN
+        CALL    KEEP_DRIVE
+        CALL    SEEK_TRACK
+        JP      NZ, FERR
+
+        CALL    KEEP_DRIVE
+        CALL    FORMAT_TRACK
+        JP      NZ, FERR
+
+        CALL    SHOW_TRACK_DONE
+        LD      A, (TRACK)
+        INC     A
+        LD      (TRACK), A
+        CP      LASTTRK+1
+        JR      NZ, TRACK_LOOP
+
+        LD      DE, MSG_DONE
+        CALL    PSTR
+        JP      WBOOT
+
+FERR:
+        CALL    FORCE_INTERRUPT
+        LD      DE, MSG_ERR
+        CALL    PSTR
+        LD      A, (ERRSTAT)
+        CALL    PHEX
+        LD      E, 'H'
+        CALL    PCHR
+        CALL    CRLF
+        JP      WBOOT
+
+EXIT:
+        LD      DE, MSG_EXIT
+        CALL    PSTR
+        JP      WBOOT
+
+; ---------------------------------------------------------------------------
+; Command line: FORMAT [A:|B:] [S|D|/S|/D] [/Y]
+; ---------------------------------------------------------------------------
 
 PARSEARG:
         LD      A, (ARGCNT)
         OR      A
         RET     Z
-
         LD      B, A
         LD      HL, ARGPTR
 
@@ -60,7 +136,6 @@ PA_SKIPSP:
         LD      A, B
         OR      A
         RET     Z
-
         LD      A, (HL)
         CP      ' '
         JR      Z, PA_SKIP1
@@ -72,11 +147,11 @@ PA_SKIP1:
         JR      PA_SKIPSP
 
 PA_GOTCHR:
-        AND     05FH
         CP      '/'
         JR      Z, PA_SWITCH
         CP      '-'
         JR      Z, PA_SWITCH
+        AND     05FH
         LD      E, A
         CP      'S'
         JR      Z, PA_LETTER
@@ -165,152 +240,386 @@ PA_SKIPTOKEN:
 
 BADARG:
         LD      DE, MSG_BADARG
-        LD      C, PRINT
-        CALL    BDOS
+        CALL    PSTR
         JP      WBOOT
 
-MODE_SYSTEM:
-        LD      A, FIRSTTRK
-        LD      (STARTTRK), A
-        LD      DE, MSG_SYS
-        JR      CONFIRM
+; ---------------------------------------------------------------------------
+; Menu and screen output
+; ---------------------------------------------------------------------------
 
-MODE_DATA:
-        LD      A, DATATRK
-        LD      (STARTTRK), A
-        LD      DE, MSG_DATA
-
-CONFIRM:
-        LD      C, PRINT
-        CALL    BDOS
-        LD      A, (AUTO)
-        OR      A
-        JR      Z, CONFIRM_ASK
-        LD      DE, MSG_AUTO
-        LD      C, PRINT
-        CALL    BDOS
-        JR      DO_FORMAT
-
-CONFIRM_ASK:
-        LD      DE, MSG_OK
-        LD      C, PRINT
-        CALL    BDOS
-        CALL    GETKEY
-        AND     05FH
-        CP      'Y'
-        JR      NZ, EXIT
-
-DO_FORMAT:
-        LD	A, (DRIVE)
-        LD      C, A
-        LD      E, 0
-        CALL    SELDSK
-        LD      A, H
-        OR      L
-        JR      Z, WERR
-
-        CALL    FILLBUF
-        LD      A, (STARTTRK)
-        LD      (TRACK), A
-
-TRKLP:
+MENU:
+        LD      DE, MSG_MENU
+        CALL    PSTR
+        CALL    SHOW_MENU_SELECTION
+        LD      DE, MSG_MENU_PROMPT
+        CALL    PSTR
+MENU_KEY:
+        CALL    GETKEY_UP
+        CP      'S'
+        JR      Z, MENU_SET
+        CP      'D'
+        JR      Z, MENU_SET
+        CP      'A'
+        JR      Z, MENU_DRIVE_A
+        CP      'B'
+        JR      Z, MENU_DRIVE_B
+        CP      'Q'
+        JR      Z, MENU_QUIT
+        JR      MENU_KEY
+MENU_DRIVE_A:
+        XOR     A
+        LD      (DRIVE), A
+        JR      MENU
+MENU_DRIVE_B:
         LD      A, 1
-        LD      (SECTOR), A
+        LD      (DRIVE), A
+        JR      MENU
+MENU_SET:
+        LD      (MODE), A
+        RET
+MENU_QUIT:
+        XOR     A
+        LD      (MODE), A
+        RET
 
-SECLP:
-        LD      A, (TRACK)
-        LD      C, A
-        LD      B, 0
-        CALL    SETTRK
+DRAW_CONFIRM:
+        LD      DE, MSG_CONFIRM
+        CALL    PSTR
+        CALL    SHOW_SELECTION
+        LD      DE, MSG_CONFIRM2
+        JP      PSTR
 
-        LD      A, (SECTOR)
-        LD      C, A
-        LD      B, 0
-        CALL    SETSEC
-
-        LD      BC, BUFFER
-        CALL    SETDMA
-
-        LD      C, 0
-        CALL    WRITE
-        OR      A
-        JR      NZ, WERR
-
-        LD      E, '.'
-        LD      C, CONOUT
-        CALL    BDOS
-
-        LD      A, (SECTOR)
-        INC     A
-        LD      (SECTOR), A
-        CP      LASTSEC+1
-        JR      NZ, SECLP
-
+DRAW_WORK:
+        LD      DE, MSG_WORK
+        CALL    PSTR
+        CALL    SHOW_SELECTION
         CALL    CRLF
+        RET
+
+SHOW_SELECTION:
+        LD      DE, MSG_DRIVE
+        CALL    PSTR
+        LD      A, (DRIVE)
+        ADD     A, 'A'
+        LD      E, A
+        CALL    PCHR
+        LD      DE, MSG_MODE
+        CALL    PSTR
+        LD      A, (MODE)
+        LD      E, A
+        JP      PCHR
+
+SHOW_MENU_SELECTION:
+        LD      DE, MSG_DRIVE
+        CALL    PSTR
+        LD      A, (DRIVE)
+        ADD     A, 'A'
+        LD      E, A
+        CALL    PCHR
+        LD      DE, MSG_MODE
+        CALL    PSTR
+        LD      A, (MODE)
+        OR      A
+        JR      NZ, SMS_MODE
+        LD      A, '-'
+SMS_MODE:
+        LD      E, A
+        JP      PCHR
+
+SHOW_TRACK_BEGIN:
+        LD      DE, MSG_TRACK
+        CALL    PSTR
         LD      A, (TRACK)
-        INC     A
-        LD      (TRACK), A
-        CP      LASTTRK+1
-        JR      NZ, TRKLP
+        CALL    PHEX
+        LD      DE, MSG_BUSY
+        JP      PSTR
 
-        LD      DE, MSG_DONE
-        LD      C, PRINT
-        CALL    BDOS
-        JP      WBOOT
+SHOW_TRACK_DONE:
+        LD      DE, MSG_OK
+        JP      PSTR
 
-WERR:
-        LD      DE, MSG_WERR
-        LD      C, PRINT
-        CALL    BDOS
-EXIT:
-        JP      WBOOT
-
-GETMODE:
+GETKEY_UP:
         LD      C, RDCON
         CALL    BDOS
         AND     05FH
         RET
 
-GETKEY:
-        LD      C, RDCON
-        CALL    BDOS
-        RET
+PSTR:
+        LD      C, PRINT
+        JP      BDOS
 
-CRLF:
-        LD      E, 0DH
-        LD      C, CONOUT
-        CALL    BDOS
-        LD      E, 0AH
+PCHR:
         LD      C, CONOUT
         JP      BDOS
 
-FILLBUF:
-        LD      HL, BUFFER
-        LD      (HL), 0E5H
-        LD      DE, BUFFER+1
-        LD      BC, 127
-        LDIR                    ; Fast Z80 fill
+CRLF:
+        LD      E, CR
+        CALL    PCHR
+        LD      E, LF
+        JP      PCHR
+
+PHEX:
+        PUSH    AF
+        RRCA
+        RRCA
+        RRCA
+        RRCA
+        CALL    PHEX_NIB
+        POP     AF
+PHEX_NIB:
+        AND     0FH
+        ADD     A, '0'
+        CP      '9'+1
+        JR      C, PHEX_OUT
+        ADD     A, 7
+PHEX_OUT:
+        LD      E, A
+        JP      PCHR
+
+; ---------------------------------------------------------------------------
+; Lynx floppy interface and MB8877 control
+; ---------------------------------------------------------------------------
+
+HW_INIT:
+        LD      A, 00FH
+        OUT     (PIOAC), A
+        OUT     (PIOBC), A
+        CALL    KEEP_DRIVE
+        CALL    MOTOR_DELAY
         RET
 
-MSG_HELLO:
-        DB      CR, LF, 'FORMAT UTIL', CR, LF
-        DB      'Usage: FORMAT [A:|B:|C:|D:] [S|D|/S|/D] [/Y]', CR, LF
-        DB      'S = system disk (preserve tracks 0-1)', CR, LF
-        DB      'D = data disk (erase all tracks)', CR, LF, '$'
-MSG_SELECT:
-        DB      'Select S/D or RETURN to cancel: $'
-MSG_SYS:  DB      CR, LF, 'System format: $'
-MSG_DATA: DB      CR, LF, 'Data format: $'
-MSG_OK:   DB      'OK (Y/N)? $'
-MSG_AUTO: DB      'start.', CR, LF, '$'
-MSG_DONE: DB      CR, LF, 'Format complete.', CR, LF, '$'
-MSG_WERR: DB      CR, LF, 'Write error - aborted.', CR, LF, '$'
-MSG_BADARG: DB    CR, LF, 'Bad argument.', CR, LF, '$'
+KEEP_DRIVE:
+        LD      A, (DRIVE)
+        OR      A
+        JR      NZ, KEEP_B
+        LD      A, 008H
+        JR      KEEP_OUT
+KEEP_B:
+        LD      A, 005H
+KEEP_OUT:
+        OUT     (PIOBD), A
+        RET
 
-DRIVE:  DB      0           ; 0=A:, 1=B:
-MODE:     DB      0           ; 0=ask, 'S'=system, 'D'=data
-AUTO:     DB      0           ; non-zero skips confirmation
+CHECK_READY:
+        CALL    KEEP_DRIVE
+        IN      A, (FDCSTS)
+        LD      (ERRSTAT), A
+        BIT     7, A
+        RET
+
+MOTOR_DELAY:
+        LD      HL, 0FFFFH
+MOTOR_D1:
+        DEC     HL
+        LD      A, H
+        OR      L
+        JR      NZ, MOTOR_D1
+        RET
+
+SEEK_TRACK:
+        CALL    KEEP_DRIVE
+        LD      A, (TRACK)
+        OR      A
+        JR      NZ, SEEK_TO_N
+        LD      A, 008H
+        OUT     (FDCCMD), A
+        CALL    WAIT_FDC_TYPE1
+        RET     NZ
+        XOR     A
+        OUT     (FDCTRK), A
+        RET
+
+SEEK_TO_N:
+        OUT     (FDCDAT), A
+        LD      A, 018H
+        OUT     (FDCCMD), A
+        CALL    WAIT_FDC_TYPE1
+        RET     NZ
+        LD      A, (TRACK)
+        OUT     (FDCTRK), A
+        XOR     A
+        RET
+
+WAIT_FDC_TYPE1:
+        LD      DE, 0FFFFH
+WFDC_1:
+        IN      A, (FDCSTS)
+        LD      (ERRSTAT), A
+        BIT     0, A
+        JR      Z, WFDC_DONE
+        DEC     DE
+        LD      A, D
+        OR      E
+        JR      NZ, WFDC_1
+        LD      A, 1
+        RET
+WFDC_DONE:
+        LD      A, (ERRSTAT)
+        AND     098H
+        RET     NZ
+        XOR     A
+        RET
+
+FORCE_INTERRUPT:
+        LD      A, 0D0H
+        OUT     (FDCCMD), A
+        RET
+
+; ---------------------------------------------------------------------------
+; Track formatter. No BDOS calls while Write Track is active.
+; ---------------------------------------------------------------------------
+
+FORMAT_TRACK:
+        XOR     A
+        LD      (SECTOR), A
+        CALL    KEEP_DRIVE
+        LD      A, 0F4H
+        OUT     (FDCCMD), A
+
+        LD      B, GAP4
+        CALL    WR_BYTE_REPEAT_ZERO
+        RET     NZ
+
+FMT_SECLP:
+        LD      B, GAP1
+        CALL    WR_BYTE_REPEAT_ZERO
+        RET     NZ
+
+        LD      A, 0FEH
+        CALL    WR_TRK_BYTE
+        RET     NZ
+        LD      A, (TRACK)
+        CALL    WR_TRK_BYTE
+        RET     NZ
+        XOR     A
+        CALL    WR_TRK_BYTE
+        RET     NZ
+        LD      A, (SECTOR)
+        INC     A
+        LD      (SECTOR), A
+        CALL    WR_TRK_BYTE
+        RET     NZ
+        XOR     A
+        CALL    WR_TRK_BYTE
+        RET     NZ
+        LD      A, 0F7H
+        CALL    WR_TRK_BYTE
+        RET     NZ
+
+        LD      B, GAP2
+        CALL    WR_BYTE_REPEAT_ZERO
+        RET     NZ
+
+        LD      A, 0FBH
+        CALL    WR_TRK_BYTE
+        RET     NZ
+        LD      B, SECSIZE
+FMT_DATLP:
+        LD      A, 0E5H
+        CALL    WR_TRK_BYTE
+        RET     NZ
+        DJNZ    FMT_DATLP
+
+        LD      A, 0F7H
+        CALL    WR_TRK_BYTE
+        RET     NZ
+
+        LD      B, GAP3
+        CALL    WR_BYTE_REPEAT_ZERO
+        RET     NZ
+
+        LD      A, (SECTOR)
+        CP      LASTSEC
+        JR      NZ, FMT_SECLP
+
+FMT_PAD:
+        LD      A, 04EH
+        CALL    WR_TRK_BYTE
+        OR      A
+        JR      Z, FMT_PAD
+        CP      2
+        JR      Z, FMT_DONE
+        RET
+
+FMT_DONE:
+        XOR     A
+        RET
+
+WR_BYTE_REPEAT_ZERO:
+        XOR     A
+WR_ZERO_1:
+        CALL    WR_TRK_BYTE
+        RET     NZ
+        DJNZ    WR_ZERO_1
+        RET
+
+WR_TRK_BYTE:
+        LD      E, A
+WR_WAIT:
+        IN      A, (FDCSTS)
+        BIT     1, A
+        JR      NZ, WR_OUT
+        BIT     0, A
+        JR      NZ, WR_WAIT
+        LD      (ERRSTAT), A
+        LD      A, 2
+        RET
+WR_OUT:
+        LD      A, E
+        OUT     (FDCDAT), A
+        XOR     A
+        RET
+
+; ---------------------------------------------------------------------------
+; Messages
+; ---------------------------------------------------------------------------
+
+MSG_MENU:
+        DB      ESC, '[2J', ESC, '[H'
+        DB      'Lynx-Z80 FORMAT', CR, LF
+        DB      '----------------', CR, LF
+        DB      'A/B : select drive', CR, LF
+        DB      'S   : system disk (tracks 0-1 preserved)', CR, LF
+        DB      'D   : data disk (all tracks)', CR, LF
+        DB      'Q   : quit', CR, LF, CR, LF
+        DB      '$'
+MSG_MENU_PROMPT:
+        DB      CR, LF, CR, LF, 'Select command: $'
+MSG_CONFIRM:
+        DB      ESC, '[2J', ESC, '[H'
+        DB      'FORMAT confirmation', CR, LF
+        DB      '-------------------', CR, LF, '$'
+MSG_CONFIRM2:
+        DB      CR, LF, 'Type Y to start: $'
+MSG_WORK:
+        DB      ESC, '[2J', ESC, '[H'
+        DB      'FORMAT running', CR, LF
+        DB      '--------------', CR, LF, '$'
+MSG_DRIVE:
+        DB      'Drive $'
+MSG_MODE:
+        DB      '  Mode $'
+MSG_TRACK:
+        DB      CR, LF, 'Track $'
+MSG_BUSY:
+        DB      ' ... $'
+MSG_OK:
+        DB      'OK$'
+MSG_DONE:
+        DB      CR, LF, 'Format complete.', CR, LF, '$'
+MSG_ERR:
+        DB      CR, LF, 'Format aborted. FDC status=$'
+MSG_EXIT:
+        DB      CR, LF, 'Canceled.', CR, LF, '$'
+MSG_BADARG:
+        DB      CR, LF, 'Bad argument. Usage: FORMAT [A:|B:] [S|D|/S|/D] [/Y]', CR, LF, '$'
+
+DRIVE:    DB      0
+MODE:     DB      0
+AUTO:     DB      0
 STARTTRK: DB      FIRSTTRK
 TRACK:    DB      0
 SECTOR:   DB      0
-BUFFER:   DS      128
+ERRSTAT:  DB      0
+
+        END
