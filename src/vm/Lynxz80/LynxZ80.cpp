@@ -298,6 +298,10 @@ void MainSubBridge::main_io_write(uint8_t addr, uint8_t data)
 	}
 	main_to_sub_data_ = data;
 	dr_full_ = true;
+#ifdef LYNXZ80_CLI_CONSOLE
+	putchar(data);
+	fflush(stdout);
+#endif
 #ifdef _DEBUG
 	bridge_log("MINSUB main write addr=%02X data=%02X '%c'", addr, data, (data >= 0x20 && data < 0x7f) ? data : '.');
 #endif
@@ -637,6 +641,7 @@ VM::VM(EMU* parent_emu) : VM_TEMPLATE(parent_emu)
 	dma->set_context_memory(memory);
 	dma->set_context_io(mainio);
 	fdc->set_context_irq(cpu_main, SIG_CPU_IRQ, 1);
+	fdc->set_context_irq(pio, SIG_Z80PIO_PORT_A, 0x01);
 	fdc->set_context_drq(dma, SIG_Z80DMA_READY, 1);
 	
 	ctc->set_context_intr(cpu_main, 0);
@@ -654,7 +659,7 @@ VM::VM(EMU* parent_emu) : VM_TEMPLATE(parent_emu)
 		device->initialize();
 	}
 	for(int drv = 0; drv < MAX_DRIVE; drv++) {
-		fdc->set_drive_type(drv, DRIVE_TYPE_2DD);
+		fdc->set_drive_type(drv, DRIVE_TYPE_2D);
 		fdc->set_drive_rpm(drv, 300);
 		fdc->set_drive_mfm(drv, false);
 	}

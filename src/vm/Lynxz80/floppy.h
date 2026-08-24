@@ -24,6 +24,9 @@ private:
 	uint8_t port_b;
 	uint8_t control_a;
 	uint8_t control_b;
+	bool head_select_n;
+	bool in_use_n;
+	bool unsafe_reset_n;
 	bool disk2_sense;
 	bool romen;
 	outputs_t outputs_romen;
@@ -40,6 +43,9 @@ public:
 		port_b = 0;
 		control_a = 0;
 		control_b = 0;
+		head_select_n = true;
+		in_use_n = true;
+		unsafe_reset_n = true;
 		disk2_sense = false;
 		romen = false;
 		fdc = NULL;
@@ -69,6 +75,18 @@ public:
 	bool get_disk2_sense() const
 	{
 		return disk2_sense;
+	}
+	bool get_head_select_n() const
+	{
+		return head_select_n;
+	}
+	bool get_in_use_n() const
+	{
+		return in_use_n;
+	}
+	bool get_unsafe_reset_n() const
+	{
+		return unsafe_reset_n;
 	}
 	bool get_romen() const
 	{

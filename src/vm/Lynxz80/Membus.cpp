@@ -13,24 +13,13 @@
 
 void MEMBUS::load_rom_image()
 {
-	static const _TCHAR* const candidates[] = {
-		_T("IPL.ROM"),
-		_T("MAIN.ROM"),
-		_T("BOOT.ROM"),
-		_T("BASIC.ROM")
-	};
-
 	// A HALT-filled ROM keeps the machine stable when no dump is present yet.
 	memset(rom, 0x76, sizeof(rom));
 	rom[0] = 0xc3;
 	rom[1] = 0x00;
 	rom[2] = 0x00;
 
-	for(size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
-		if(read_bios(candidates[i], rom, sizeof(rom)) > 0) {
-			return;
-		}
-	}
+	read_bios(_T("IPL.ROM"), rom, sizeof(rom));
 }
 
 void MEMBUS::update_memory_map()
