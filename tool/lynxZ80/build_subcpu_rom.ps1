@@ -33,7 +33,7 @@ try {
 
     $object = Join-Path $stage 'subcpurom.p'
     $listing = Join-Path $stage 'subcpurom.lst'
-    $romBin = Join-Path $stage 'subcpurom.bin'
+    $romBin = Join-Path $stage 'subcpu.bin'
 
     & $p2bin $object $romBin '-r' '0x0000-0x1fff' '-l' '0xff'
     if($LASTEXITCODE -ne 0) {
