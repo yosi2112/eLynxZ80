@@ -14,16 +14,17 @@ FDCCMD  EQU     02CH
 FDCTRK  EQU     02DH
 FDCSEC  EQU     02EH
 FDCDAT  EQU     02FH
+PIOAD   EQU     030H
 PIOBD   EQU     031H
 PIOAC   EQU     032H
 PIOBC   EQU     033H
 
-FIRSTTRK EQU    2
+FIRSTTRK EQU    1
 DATATRK  EQU    0
-LASTTRK  EQU    76
-LASTSEC  EQU    26
+LASTTRK  EQU    39
+LASTSEC  EQU    16
 MAXDRV   EQU    2
-SECSIZE  EQU     128
+SECSIZE  EQU     0
 
 GAP4     EQU     40
 GAP1     EQU     6
@@ -85,6 +86,19 @@ DO_FORMAT:
         LD      (TRACK), A
 
 TRACK_LOOP:
+        XOR     A
+        LD      (SIDE), A
+        CALL    SHOW_TRACK_BEGIN
+        CALL    KEEP_DRIVE
+        CALL    SEEK_TRACK
+        JP      NZ, FERR
+
+        CALL    KEEP_DRIVE
+        CALL    FORMAT_TRACK
+        JP      NZ, FERR
+
+        LD      A, 040H
+        LD      (SIDE), A
         CALL    SHOW_TRACK_BEGIN
         CALL    KEEP_DRIVE
         CALL    SEEK_TRACK
@@ -397,6 +411,10 @@ KEEP_DRIVE:
 KEEP_B:
         LD      A, 005H
 KEEP_OUT:
+        PUSH    AF
+        LD      A, (SIDE)
+        OUT     (PIOAD), A
+        POP     AF
         OUT     (PIOBD), A
         RET
 
@@ -491,7 +509,11 @@ FMT_SECLP:
         LD      A, (TRACK)
         CALL    WR_TRK_BYTE
         RET     NZ
-        XOR     A
+        LD      A, (SIDE)
+        OR      A
+        JR      Z, FMT_SIDE_ID
+        LD      A, 1
+FMT_SIDE_ID:
         CALL    WR_TRK_BYTE
         RET     NZ
         LD      A, (SECTOR)
@@ -499,7 +521,7 @@ FMT_SECLP:
         LD      (SECTOR), A
         CALL    WR_TRK_BYTE
         RET     NZ
-        XOR     A
+        LD      A, 1
         CALL    WR_TRK_BYTE
         RET     NZ
         LD      A, 0F7H
@@ -579,8 +601,8 @@ MSG_MENU:
         DB      'Lynx-Z80 FORMAT', CR, LF
         DB      '----------------', CR, LF
         DB      'A/B : select drive', CR, LF
-        DB      'S   : system disk (tracks 0-1 preserved)', CR, LF
-        DB      'D   : data disk (all tracks)', CR, LF
+        DB      'S   : system disk (cylinder 0 preserved)', CR, LF
+        DB      'D   : data disk (all cylinders)', CR, LF
         DB      'Q   : quit', CR, LF, CR, LF
         DB      '$'
 MSG_MENU_PROMPT:
@@ -600,7 +622,7 @@ MSG_DRIVE:
 MSG_MODE:
         DB      '  Mode $'
 MSG_TRACK:
-        DB      CR, LF, 'Track $'
+        DB      CR, LF, 'Cylinder $'
 MSG_BUSY:
         DB      ' ... $'
 MSG_OK:
@@ -620,6 +642,7 @@ AUTO:     DB      0
 STARTTRK: DB      FIRSTTRK
 TRACK:    DB      0
 SECTOR:   DB      0
+SIDE:     DB      0
 ERRSTAT:  DB      0
 
         END

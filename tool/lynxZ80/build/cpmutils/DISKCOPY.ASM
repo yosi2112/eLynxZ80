@@ -1,64 +1,67 @@
 ; Lynx-Z80 CP/M 2.2 DISKCOPY.COM
-; Multi-drive disk copy using Z80 DMA and MB8877A FDC.
-; Optimized for Z80 (MacroAssembler AS)
+; Disk copy through CP/M BIOS calls.
+;
+; This version deliberately avoids direct FDC, PIO, and DMA port access.
+; It copies 40 cylinders x 64 CP/M logical sectors through BIOS
+; SELDSK/SETTRK/SETSEC/SETDMA/READ/WRITE.
+; The target disk must already be formatted.
 
         CPU     Z80
 
 BDOS    EQU     0005H
+WBOOT   EQU     0000H
 CONOUT  EQU     0002H
 PRINT   EQU     0009H
 RDCON   EQU     0001H
-WBOOT   EQU     0000H
 
-DMA_P   EQU     028H
-FDCSTS  EQU     02CH
-FDCCMD  EQU     02CH
-FDCTRK  EQU     02DH
-FDCSEC  EQU     02EH
-FDCDAT  EQU     02FH
-PIOBD   EQU     031H
-PIOAC   EQU     032H
-PIOBC   EQU     033H
+BIOS_WBOOT_VEC EQU 0001H
+
+BIOS_HOME_OFF  EQU 24
+BIOS_SELDSK_OFF EQU 27
+BIOS_SETTRK_OFF EQU 30
+BIOS_SETSEC_OFF EQU 33
+BIOS_SETDMA_OFF EQU 36
+BIOS_READ_OFF  EQU 39
+BIOS_WRITE_OFF EQU 42
 
 FIRSTTRK EQU    0
-LASTTRK  EQU    76
-LASTSEC  EQU    26
-MAXDRV   EQU    4
+LASTTRK  EQU    39
+LASTSEC  EQU    64
+MAXDRV   EQU    2
 BUFFER   EQU    08000H
+SECSIZE  EQU    128
+
+CR       EQU    0DH
+LF       EQU    0AH
+ESC      EQU    1BH
 
         ORG     0100H
 
 START:
-        LD      SP, 08000H      ; Set stack below buffer
+        LD      SP, BUFFER
         LD      DE, MSG_HELLO
-        LD      C, PRINT
-        CALL    BDOS
+        CALL    PSTR
         CALL    ASK_DRIVES
         JR      NZ, EXIT
         LD      DE, MSG_START
-        LD      C, PRINT
-        CALL    BDOS
+        CALL    PSTR
         CALL    GETYES
         JR      NZ, EXIT
 
-        CALL    HW_INIT
         XOR     A
         LD      (TRACK), A
 
 TRACK_LOOP:
-        CALL    SELECT_SRC
+        CALL    SHOW_TRACK_BEGIN
         CALL    READ_TRACK
         OR      A
         JR      NZ, RERR
 
-        CALL    SELECT_DST
         CALL    WRITE_TRACK
         OR      A
         JR      NZ, WERR
 
-        LD      E, '.'
-        LD      C, CONOUT
-        CALL    BDOS
+        CALL    SHOW_TRACK_DONE
 
         LD      A, (TRACK)
         INC     A
@@ -67,8 +70,7 @@ TRACK_LOOP:
         JR      NZ, TRACK_LOOP
 
         LD      DE, MSG_DONE
-        LD      C, PRINT
-        CALL    BDOS
+        CALL    PSTR
         JP      WBOOT
 
 RERR:
@@ -77,8 +79,8 @@ RERR:
 WERR:
         LD      DE, MSG_WERR
 ERR_EXIT:
-        LD      C, PRINT
-        CALL    BDOS
+        CALL    PSTR
+        CALL    PRINT_STATUS
 EXIT:
         JP      WBOOT
 
@@ -89,35 +91,16 @@ GETYES:
         CP      'Y'
         RET
 
-HW_INIT:
-        LD      A, 00FH
-        OUT     (PIOAC), A
-        OUT     (PIOBC), A
-        CALL    SELECT_SRC
-        RET
-
-SELECT_SRC:
-        LD      A, (SRC_DRIVE)
-        JR      SEL_COMM
-SELECT_DST:
-        LD      A, (DST_DRIVE)
-SEL_COMM:
-        OR      008H
-        OUT     (PIOBD), A
-        RET
-
 ASK_DRIVES:
         LD      DE, MSG_SRC
-        LD      C, PRINT
-        CALL    BDOS
+        CALL    PSTR
         CALL    READ_DRIVE
         CP      0FFH
         JR      Z, ASK_BAD
         LD      (SRC_DRIVE), A
 
         LD      DE, MSG_DST
-        LD      C, PRINT
-        CALL    BDOS
+        CALL    PSTR
         CALL    READ_DRIVE
         CP      0FFH
         JR      Z, ASK_BAD
@@ -136,8 +119,7 @@ ASK_BAD:
 ASK_SAME:
         LD      DE, MSG_SAME
 ASK_FAIL:
-        LD      C, PRINT
-        CALL    BDOS
+        CALL    PSTR
         OR      1
         RET
 
@@ -156,184 +138,221 @@ DRIVE_BAD:
         RET
 
 READ_TRACK:
-        CALL    SEEK_TRACK
-        RET     NZ
         LD      HL, BUFFER
-        LD      B, LASTSEC
+        LD      (DMA_PTR), HL
         LD      A, 1
         LD      (SECTOR), A
+        LD      B, LASTSEC
 READ_T1:
         PUSH    BC
-        CALL    READ_SECTOR_DMA
+        LD      A, (SRC_DRIVE)
+        CALL    BIOS_SELDSK
+        JR      NZ, READ_FAIL
+        CALL    BIOS_SET_POS
+        CALL    BIOS_READ
+        OR      A
+        JR      NZ, READ_FAIL
+        CALL    ADVANCE_DMA_SECTOR
         POP     BC
-        RET     NZ
-        LD      DE, 128
-        ADD     HL, DE
-        LD      A, (SECTOR)
-        INC     A
-        LD      (SECTOR), A
         DJNZ    READ_T1
         XOR     A
         RET
+READ_FAIL:
+        LD      (ERRSTAT), A
+        POP     BC
+        OR      1
+        RET
 
 WRITE_TRACK:
-        CALL    SEEK_TRACK
-        RET     NZ
         LD      HL, BUFFER
-        LD      B, LASTSEC
+        LD      (DMA_PTR), HL
         LD      A, 1
         LD      (SECTOR), A
+        LD      B, LASTSEC
 WRITE_T1:
         PUSH    BC
-        CALL    WRITE_SECTOR_DMA
+        LD      A, (DST_DRIVE)
+        CALL    BIOS_SELDSK
+        JR      NZ, WRITE_FAIL
+        CALL    BIOS_SET_POS
+        CALL    BIOS_WRITE
+        OR      A
+        JR      NZ, WRITE_FAIL
+        CALL    ADVANCE_DMA_SECTOR
         POP     BC
-        RET     NZ
-        LD      DE, 128
-        ADD     HL, DE
-        LD      A, (SECTOR)
-        INC     A
-        LD      (SECTOR), A
         DJNZ    WRITE_T1
         XOR     A
         RET
+WRITE_FAIL:
+        LD      (ERRSTAT), A
+        POP     BC
+        OR      1
+        RET
 
-SEEK_TRACK:
+BIOS_SET_POS:
         LD      A, (TRACK)
-        OR      A
-        JR      NZ, SEEK_TO_N
-        LD      A, 008H
-        OUT     (FDCCMD), A
-        JP      WAIT_FDC
-SEEK_TO_N:
-        OUT     (FDCTRK), A
-        OUT     (FDCDAT), A
-        LD      A, 018H
-        OUT     (FDCCMD), A
-        JP      WAIT_FDC
-
-READ_SECTOR_DMA:
-        LD      A, (TRACK)
-        OUT     (FDCTRK), A
+        LD      C, A
+        LD      B, 0
+        CALL    BIOS_SETTRK
         LD      A, (SECTOR)
-        OUT     (FDCSEC), A
-        CALL    DMA_READ_SETUP
-        LD      A, 088H
-        OUT     (FDCCMD), A
-        JP      WAIT_FDC
+        LD      C, A
+        LD      B, 0
+        CALL    BIOS_SETSEC
+        LD      BC, (DMA_PTR)
+        JP      BIOS_SETDMA
 
-WRITE_SECTOR_DMA:
-        LD      A, (TRACK)
-        OUT     (FDCTRK), A
+ADVANCE_DMA_SECTOR:
+        LD      HL, (DMA_PTR)
+        LD      DE, SECSIZE
+        ADD     HL, DE
+        LD      (DMA_PTR), HL
         LD      A, (SECTOR)
-        OUT     (FDCSEC), A
-        CALL    DMA_WRITE_SETUP
-        LD      A, 0A8H
-        OUT     (FDCCMD), A
-        JP      WAIT_FDC
+        INC     A
+        LD      (SECTOR), A
+        RET
 
-DMA_READ_SETUP:
-        LD      A, 0C3H
-        OUT     (DMA_P), A
-        LD      A, 079H
-        OUT     (DMA_P), A
-        LD      A, L
-        OUT     (DMA_P), A
+BIOS_SELDSK:
+        PUSH    AF
+        LD      DE, BIOS_SELDSK_OFF
+        CALL    BIOS_VECTOR
+        POP     AF
+        LD      C, A
+        CALL    CALL_BIOS_HL
         LD      A, H
-        OUT     (DMA_P), A
-        LD      A, 07FH
-        OUT     (DMA_P), A
-        LD      A, 000H
-        OUT     (DMA_P), A
-        LD      A, 014H
-        OUT     (DMA_P), A
-        LD      A, 028H
-        OUT     (DMA_P), A
-        LD      A, 0C5H
-        OUT     (DMA_P), A
-        LD      A, 02FH
-        OUT     (DMA_P), A
-        LD      A, 08AH
-        OUT     (DMA_P), A
-        LD      A, 0CFH
-        OUT     (DMA_P), A
-        LD      A, 087H
-        OUT     (DMA_P), A
-        RET
-
-DMA_WRITE_SETUP:
-        LD      A, 0C3H
-        OUT     (DMA_P), A
-        LD      A, 079H
-        OUT     (DMA_P), A
-        LD      A, L
-        OUT     (DMA_P), A
-        LD      A, H
-        OUT     (DMA_P), A
-        LD      A, 07FH
-        OUT     (DMA_P), A
-        LD      A, 000H
-        OUT     (DMA_P), A
-        LD      A, 014H
-        OUT     (DMA_P), A
-        LD      A, 028H
-        OUT     (DMA_P), A
-        LD      A, 0C5H
-        OUT     (DMA_P), A
-        LD      A, 02FH
-        OUT     (DMA_P), A
-        LD      A, 08AH
-        OUT     (DMA_P), A
-        LD      A, 0CFH
-        OUT     (DMA_P), A
-        LD      A, 005H
-        OUT     (DMA_P), A
-        LD      A, 0CFH
-        OUT     (DMA_P), A
-        LD      A, 087H
-        OUT     (DMA_P), A
-        RET
-
-WAIT_FDC:
-        LD      DE, 0FFFFH
-WAIT1:
-        IN      A, (FDCSTS)
-        CP      0FFH
-        JR      Z, WAIT_FAIL
-        LD      B, A
-        AND     001H
-        JR      Z, WAIT_DONE
-        DEC     DE
-        LD      A, D
-        OR      E
-        JR      NZ, WAIT1
-WAIT_FAIL:
-        LD      A, 1
-        RET
-
-WAIT_DONE:
-        LD      A, B
-        AND     098H
-        RET     NZ
+        OR      L
+        JR      Z, BIOS_SELDSK_FAIL
         XOR     A
         RET
+BIOS_SELDSK_FAIL:
+        OR      1
+        RET
+
+BIOS_SETTRK:
+        PUSH    BC
+        LD      DE, BIOS_SETTRK_OFF
+        CALL    BIOS_VECTOR
+        POP     BC
+        JP      CALL_BIOS_HL
+
+BIOS_SETSEC:
+        PUSH    BC
+        LD      DE, BIOS_SETSEC_OFF
+        CALL    BIOS_VECTOR
+        POP     BC
+        JP      CALL_BIOS_HL
+
+BIOS_SETDMA:
+        PUSH    BC
+        LD      DE, BIOS_SETDMA_OFF
+        CALL    BIOS_VECTOR
+        POP     BC
+        JP      CALL_BIOS_HL
+
+BIOS_READ:
+        LD      DE, BIOS_READ_OFF
+        CALL    BIOS_VECTOR
+        JP      CALL_BIOS_HL
+
+BIOS_WRITE:
+        LD      DE, BIOS_WRITE_OFF
+        CALL    BIOS_VECTOR
+        LD      C, 0
+        JP      CALL_BIOS_HL
+
+BIOS_VECTOR:
+        LD      HL, (BIOS_WBOOT_VEC)
+        DEC     HL
+        DEC     HL
+        DEC     HL
+        ADD     HL, DE
+        RET
+
+CALL_BIOS_HL:
+        LD      DE, BIOS_RETURN
+        PUSH    DE
+        JP      (HL)
+BIOS_RETURN:
+        RET
+
+PRINT_STATUS:
+        LD      DE, MSG_STAT
+        CALL    PSTR
+        LD      A, (ERRSTAT)
+        CALL    PRINT_HEX
+        LD      DE, MSG_SECSTAT
+        CALL    PSTR
+        LD      A, (SECTOR)
+        CALL    PRINT_HEX
+        JP      CRLF
+
+SHOW_TRACK_BEGIN:
+        LD      DE, MSG_TRACK
+        CALL    PSTR
+        LD      A, (TRACK)
+        CALL    PRINT_HEX
+        LD      DE, MSG_BUSY
+        JP      PSTR
+
+SHOW_TRACK_DONE:
+        LD      DE, MSG_OK
+        JP      PSTR
+
+PSTR:
+        LD      C, PRINT
+        JP      BDOS
+
+CRLF:
+        LD      E, CR
+        LD      C, CONOUT
+        CALL    BDOS
+        LD      E, LF
+        LD      C, CONOUT
+        JP      BDOS
+
+PRINT_HEX:
+        PUSH    AF
+        RRCA
+        RRCA
+        RRCA
+        RRCA
+        CALL    PRINT_NIB
+        POP     AF
+PRINT_NIB:
+        AND     00FH
+        ADD     A, '0'
+        CP      '9'+1
+        JR      C, PRINT_HEX_OUT
+        ADD     A, 7
+PRINT_HEX_OUT:
+        LD      E, A
+        LD      C, CONOUT
+        JP      BDOS
 
 MSG_HELLO:
-        DB      CR, LF, 'DISKCOPY using Z80 DMA.', CR, LF
-        DB      'Supported drives: A: B: C: D:', CR, LF, '$'
+        DB      ESC, '[2J', ESC, '[H'
+        DB      'Lynx-Z80 DISKCOPY', CR, LF
+        DB      '-----------------', CR, LF
+        DB      'Geometry: 40 cyl, 64 CP/M sectors/cyl', CR, LF
+        DB      'BIOS sector copy. Target disk must be formatted.', CR, LF
+        DB      'Supported drives: A: B:', CR, LF, '$'
 MSG_SRC:  DB      'Source drive? $'
 MSG_DST:  DB      CR, LF, 'Target drive? $'
 MSG_START:
-        DB      CR, LF, 'Insert disks. Copy 77 tracks. Start (Y/N)? $'
-MSG_BAD:  DB      CR, LF, 'Bad drive. Use A-D.', CR, LF, '$'
+        DB      CR, LF, 'Insert disks. Copy 40 cylinders. Start (Y/N)? $'
+MSG_BAD:  DB      CR, LF, 'Bad drive. Use A-B.', CR, LF, '$'
 MSG_SAME: DB      CR, LF, 'Source and target must be different.', CR, LF, '$'
 MSG_DONE: DB      CR, LF, 'Disk copy complete.', CR, LF, '$'
 MSG_RERR: DB      CR, LF, 'Read error - aborted.', CR, LF, '$'
 MSG_WERR: DB      CR, LF, 'Write error - aborted.', CR, LF, '$'
-
-CR      EQU     0DH
-LF      EQU     0AH
+MSG_STAT: DB      'BIOS status: $'
+MSG_SECSTAT: DB   ' Sector: $'
+MSG_TRACK: DB     CR, LF, 'Cylinder $'
+MSG_BUSY:  DB     ' ... $'
+MSG_OK:    DB     'OK$'
 
 SRC_DRIVE: DB      0
 DST_DRIVE: DB      1
 TRACK:     DB      0
 SECTOR:    DB      1
+ERRSTAT:   DB      0
+DMA_PTR:   DW      BUFFER
