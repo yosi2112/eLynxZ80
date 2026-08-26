@@ -1,7 +1,7 @@
 /*
-	Lynx Z80 Emulator
+	Homebrew dual Z80 CP/M machine Emulator "eLynxZ80"
 
-	Author : OpenAI Codex
+	Author : yosi with OpenAI Codex
 	Date   : 2026.05.01-
 
 	[ virtual machine ]

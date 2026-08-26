@@ -1,5 +1,7 @@
 /*
-	Lynx Z80 Emulator
+	Homebrew dual Z80 CP/M machine Emulator "eLynxZ80"
+
+	Author : yosi with OpenAI Codex
 
 	[ keyboard ]
 */
