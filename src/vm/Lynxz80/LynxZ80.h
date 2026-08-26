@@ -10,7 +10,7 @@
 #ifndef _LYNXZ80_H_
 #define _LYNXZ80_H_
 
-#define DEVICE_NAME		"Homebrew Lynx"
+#define DEVICE_NAME		"Homebrew dual Z80 CP/M machine Lynx"
 #define CONFIG_NAME		"lynxz80"
 
 // device informations for virtual machine
