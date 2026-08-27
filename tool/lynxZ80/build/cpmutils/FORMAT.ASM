@@ -413,6 +413,7 @@ KEEP_B:
 KEEP_OUT:
         PUSH    AF
         LD      A, (SIDE)
+        OR      A, 010H
         OUT     (PIOAD), A
         POP     AF
         OUT     (PIOBD), A

@@ -1,9 +1,10 @@
 ; Lynx-Z80 CP/M 2.2 DISKCOPY.COM
-; Disk copy through CP/M BIOS calls.
+; Disk copy through the Lynx FDC.
 ;
-; This version deliberately avoids direct FDC, PIO, and DMA port access.
-; It copies 40 cylinders x 64 CP/M logical sectors through BIOS
-; SELDSK/SETTRK/SETSEC/SETDMA/READ/WRITE.
+; 2D geometry: 40 tracks, 2 sides, 16 sectors/side, 256 bytes/sector.
+; Sector numbering is sequential with a sector gap/interleave of 1.
+; Reading physical sectors here avoids the resident BIOS logical-sector
+; mapping and copies the complete 8 KB track pair without missing a side.
 ; The target disk must already be formatted.
 
         CPU     Z80
@@ -14,22 +15,22 @@ CONOUT  EQU     0002H
 PRINT   EQU     0009H
 RDCON   EQU     0001H
 
-BIOS_WBOOT_VEC EQU 0001H
-
-BIOS_HOME_OFF  EQU 24
-BIOS_SELDSK_OFF EQU 27
-BIOS_SETTRK_OFF EQU 30
-BIOS_SETSEC_OFF EQU 33
-BIOS_SETDMA_OFF EQU 36
-BIOS_READ_OFF  EQU 39
-BIOS_WRITE_OFF EQU 42
+FDC_CMD_PORT   EQU 02CH
+FDC_TRK_PORT   EQU 02DH
+FDC_SEC_PORT   EQU 02EH
+FDC_DATA_PORT  EQU 02FH
+PIO_PORT_A_DATA EQU 030H
+PIO_PORT_B_DATA EQU 031H
 
 FIRSTTRK EQU    0
 LASTTRK  EQU    39
-LASTSEC  EQU    64
+SIDES    EQU    2
+PHYSSEC  EQU    16
+SECGAP   EQU    1
+SECSIZE  EQU    256
 MAXDRV   EQU    2
 BUFFER   EQU    08000H
-SECSIZE  EQU    128
+SIDEB    EQU    040H
 
 CR       EQU    0DH
 LF       EQU    0AH
@@ -139,139 +140,173 @@ DRIVE_BAD:
 
 READ_TRACK:
         LD      HL, BUFFER
-        LD      (DMA_PTR), HL
-        LD      A, 1
-        LD      (SECTOR), A
-        LD      B, LASTSEC
-READ_T1:
-        PUSH    BC
         LD      A, (SRC_DRIVE)
-        CALL    BIOS_SELDSK
-        JR      NZ, READ_FAIL
-        CALL    BIOS_SET_POS
-        CALL    BIOS_READ
-        OR      A
-        JR      NZ, READ_FAIL
-        CALL    ADVANCE_DMA_SECTOR
-        POP     BC
-        DJNZ    READ_T1
+        LD      (ACTIVE_DRIVE), A
         XOR     A
-        RET
-READ_FAIL:
-        LD      (ERRSTAT), A
-        POP     BC
-        OR      1
+        CALL    READ_SIDE
+        OR      A
+        RET     NZ
+        LD      A, SIDEB
+        CALL    READ_SIDE
+        OR      A
         RET
 
 WRITE_TRACK:
         LD      HL, BUFFER
-        LD      (DMA_PTR), HL
-        LD      A, 1
-        LD      (SECTOR), A
-        LD      B, LASTSEC
-WRITE_T1:
-        PUSH    BC
         LD      A, (DST_DRIVE)
-        CALL    BIOS_SELDSK
-        JR      NZ, WRITE_FAIL
-        CALL    BIOS_SET_POS
-        CALL    BIOS_WRITE
+        LD      (ACTIVE_DRIVE), A
+        XOR     A
+        CALL    WRITE_SIDE
         OR      A
-        JR      NZ, WRITE_FAIL
-        CALL    ADVANCE_DMA_SECTOR
+        RET     NZ
+        LD      A, SIDEB
+        CALL    WRITE_SIDE
+        OR      A
+        RET
+
+READ_SIDE:
+        LD      (SIDE), A
+        CALL    FDC_SELECT
+        CALL    FDC_SEEK
+        JR      C, DISK_IO_FAIL
+        LD      B, PHYSSEC
+        LD      C, SECGAP
+READ_PHYS_LOOP:
+        PUSH    BC
+        CALL    FDC_READ_PHYS
         POP     BC
-        DJNZ    WRITE_T1
+        JR      C, DISK_IO_FAIL
+        INC     C
+        DJNZ    READ_PHYS_LOOP
         XOR     A
         RET
-WRITE_FAIL:
+
+WRITE_SIDE:
+        LD      (SIDE), A
+        CALL    FDC_SELECT
+        CALL    FDC_SEEK
+        JR      C, DISK_IO_FAIL
+        LD      B, PHYSSEC
+        LD      C, SECGAP
+WRITE_PHYS_LOOP:
+        PUSH    BC
+        CALL    FDC_WRITE_PHYS
+        POP     BC
+        JR      C, DISK_IO_FAIL
+        INC     C
+        DJNZ    WRITE_PHYS_LOOP
+        XOR     A
+        RET
+
+DISK_IO_FAIL:
         LD      (ERRSTAT), A
-        POP     BC
-        OR      1
+        LD      A, 1
         RET
 
-BIOS_SET_POS:
-        LD      A, (TRACK)
-        LD      C, A
-        LD      B, 0
-        CALL    BIOS_SETTRK
-        LD      A, (SECTOR)
-        LD      C, A
-        LD      B, 0
-        CALL    BIOS_SETSEC
-        LD      BC, (DMA_PTR)
-        JP      BIOS_SETDMA
-
-ADVANCE_DMA_SECTOR:
-        LD      HL, (DMA_PTR)
-        LD      DE, SECSIZE
-        ADD     HL, DE
-        LD      (DMA_PTR), HL
-        LD      A, (SECTOR)
-        INC     A
-        LD      (SECTOR), A
-        RET
-
-BIOS_SELDSK:
-        PUSH    AF
-        LD      DE, BIOS_SELDSK_OFF
-        CALL    BIOS_VECTOR
-        POP     AF
-        LD      C, A
-        CALL    CALL_BIOS_HL
-        LD      A, H
-        OR      L
-        JR      Z, BIOS_SELDSK_FAIL
+FDC_SELECT:
+        LD      A, (ACTIVE_DRIVE)
+        OR      A
+        LD      A, 008H
+        JR      Z, FDC_SELECT_CTRL
+        LD      A, 005H
+FDC_SELECT_CTRL:
+        OUT     (PIO_PORT_B_DATA), A
+        LD      A, (SIDE)
+        OR      010H
+        OUT     (PIO_PORT_A_DATA), A
         XOR     A
-        RET
-BIOS_SELDSK_FAIL:
-        OR      1
+        OUT     (FDC_SEC_PORT), A
         RET
 
-BIOS_SETTRK:
-        PUSH    BC
-        LD      DE, BIOS_SETTRK_OFF
-        CALL    BIOS_VECTOR
-        POP     BC
-        JP      CALL_BIOS_HL
-
-BIOS_SETSEC:
-        PUSH    BC
-        LD      DE, BIOS_SETSEC_OFF
-        CALL    BIOS_VECTOR
-        POP     BC
-        JP      CALL_BIOS_HL
-
-BIOS_SETDMA:
-        PUSH    BC
-        LD      DE, BIOS_SETDMA_OFF
-        CALL    BIOS_VECTOR
-        POP     BC
-        JP      CALL_BIOS_HL
-
-BIOS_READ:
-        LD      DE, BIOS_READ_OFF
-        CALL    BIOS_VECTOR
-        JP      CALL_BIOS_HL
-
-BIOS_WRITE:
-        LD      DE, BIOS_WRITE_OFF
-        CALL    BIOS_VECTOR
-        LD      C, 0
-        JP      CALL_BIOS_HL
-
-BIOS_VECTOR:
-        LD      HL, (BIOS_WBOOT_VEC)
-        DEC     HL
-        DEC     HL
-        DEC     HL
-        ADD     HL, DE
+FDC_SEEK:
+        LD      A, (TRACK)
+        OR      A
+        JR      NZ, FDC_SEEK_TRACK
+        LD      A, 008H
+        OUT     (FDC_CMD_PORT), A
+        CALL    FDC_WAIT_NOT_BUSY
+        RET     C
+        JR      FDC_STORE_TRACK
+FDC_SEEK_TRACK:
+        OUT     (FDC_DATA_PORT), A
+        LD      A, 018H
+        OUT     (FDC_CMD_PORT), A
+        CALL    FDC_WAIT_NOT_BUSY
+        RET     C
+FDC_STORE_TRACK:
+        LD      A, (TRACK)
+        OUT     (FDC_TRK_PORT), A
+        OR      A
         RET
 
-CALL_BIOS_HL:
-        LD      DE, BIOS_RETURN
-        PUSH    DE
-        JP      (HL)
-BIOS_RETURN:
+FDC_READ_PHYS:
+        LD      A, C
+        LD      (SECTOR), A
+        LD      A, C
+        OUT     (FDC_SEC_PORT), A
+        LD      A, 088H
+        OUT     (FDC_CMD_PORT), A
+        LD      B, 0
+FDC_READ_BYTE_LOOP:
+        IN      A, (FDC_CMD_PORT)
+        BIT     1, A
+        JR      NZ, FDC_READ_BYTE_READY
+        BIT     0, A
+        JR      NZ, FDC_READ_BYTE_LOOP
+        SCF
+        RET
+FDC_READ_BYTE_READY:
+        IN      A, (FDC_DATA_PORT)
+        LD      (HL), A
+        INC     HL
+        DJNZ    FDC_READ_BYTE_LOOP
+        JP      FDC_WAIT_NOT_BUSY
+
+FDC_WRITE_PHYS:
+        LD      A, C
+        LD      (SECTOR), A
+        LD      A, C
+        OUT     (FDC_SEC_PORT), A
+        LD      A, 0A8H
+        OUT     (FDC_CMD_PORT), A
+        LD      B, 0
+FDC_WRITE_BYTE_LOOP:
+        IN      A, (FDC_CMD_PORT)
+        BIT     1, A
+        JR      NZ, FDC_WRITE_BYTE_READY
+        BIT     0, A
+        JR      NZ, FDC_WRITE_BYTE_LOOP
+        SCF
+        RET
+FDC_WRITE_BYTE_READY:
+        LD      A, (HL)
+        OUT     (FDC_DATA_PORT), A
+        INC     HL
+        DJNZ    FDC_WRITE_BYTE_LOOP
+        JP      FDC_WAIT_NOT_BUSY
+
+FDC_WAIT_NOT_BUSY:
+        LD      DE, 0FFFFH
+FDC_WAIT_NOT_BUSY_LOOP:
+        IN      A, (FDC_CMD_PORT)
+        CP      0FFH
+        JR      Z, FDC_WAIT_FAIL
+        BIT     0, A
+        JR      Z, FDC_WAIT_DONE
+        DEC     DE
+        LD      A, D
+        OR      E
+        JR      NZ, FDC_WAIT_NOT_BUSY_LOOP
+FDC_WAIT_FAIL:
+        SCF
+        RET
+FDC_WAIT_DONE:
+        AND     098H
+        JR      Z, FDC_WAIT_OK
+        SCF
+        RET
+FDC_WAIT_OK:
+        OR      A
         RET
 
 PRINT_STATUS:
@@ -332,8 +367,8 @@ MSG_HELLO:
         DB      ESC, '[2J', ESC, '[H'
         DB      'Lynx-Z80 DISKCOPY', CR, LF
         DB      '-----------------', CR, LF
-        DB      'Geometry: 40 cyl, 64 CP/M sectors/cyl', CR, LF
-        DB      'BIOS sector copy. Target disk must be formatted.', CR, LF
+        DB      'Geometry: 2D, 40 tracks, 2 sides, 16 x 256-byte sectors', CR, LF
+        DB      'Sector gap/interleave: 1. Target disk must be formatted.', CR, LF
         DB      'Supported drives: A: B:', CR, LF, '$'
 MSG_SRC:  DB      'Source drive? $'
 MSG_DST:  DB      CR, LF, 'Target drive? $'
@@ -352,7 +387,8 @@ MSG_OK:    DB     'OK$'
 
 SRC_DRIVE: DB      0
 DST_DRIVE: DB      1
+ACTIVE_DRIVE: DB    0
+SIDE:      DB      0
 TRACK:     DB      0
 SECTOR:    DB      1
 ERRSTAT:   DB      0
-DMA_PTR:   DW      BUFFER
