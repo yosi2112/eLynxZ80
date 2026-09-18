@@ -119,10 +119,10 @@ tool/lynxZ80/bin/CPM22_SYSTEM.2d
 | `build_cpm22_env.ps1` | CP/M 2.2 ソース・標準コマンドの準備 |
 | `build_cpm22_runtime.ps1` | `CPM22_RUNTIME.BIN` の生成 |
 | `build_cpm22_system_disk.ps1` | `CPM22_SYSTEM.2d` の生成 |
-| `ROMCPY.ps1` | ROM の Debug / Release ディレクトリへのコピー |
-| `diskeditor.ps1` | 旧形式 CP/M ディスクイメージ編集ツール |
+| `ROMCPY.ps1` | ROM の x86/x64 Debug / Release ディレクトリへのコピー |
+| `diskeditor.ps1` | 現行および旧形式 CP/M ディスクイメージ編集ツール |
 
-各スクリプトには固定パスや旧ディレクトリ構成を前提としているものがあります。実行前に [tool/lynxZ80/README.md](tool/lynxZ80/README.md) の「既知の注意事項」を確認してください。
+ROM / CP/M 用スクリプトは現行ディレクトリ構成へ統一され、AS / p2bin などは PATH から検出できます。詳細な引数、生成先、互換モードは [tool/lynxZ80/README.md](tool/lynxZ80/README.md) を参照してください。
 
 ## 技術資料
 
