@@ -75,14 +75,14 @@ Use `-FontPath` to select a font from another location.
 
 | Output | Default location |
 | --- | --- |
-| `IPL.ROM` | `tool/lynxZ80/bin/IPL.ROM` |
-| `SUBCPU.ROM` | `src/vm/Lynxz80/build/SUBCPU.ROM` |
+| `IPL.ROM` | `tool/lynxZ80/bin/IPL.ROM` and `src/vm/Lynxz80/build/IPL.ROM` |
+| `SUBCPU.ROM` | `tool/lynxZ80/bin/SUBCPU.ROM` and `src/vm/Lynxz80/build/SUBCPU.ROM` |
 | `FONT.ROM` | `tool/lynxZ80/build/font/FONT.ROM` |
 | `CPM22_RUNTIME.BIN` | `tool/lynxZ80/bin/CPM22_RUNTIME.BIN` |
 | `CPM22_SYSTEM.2d` | `tool/lynxZ80/bin/CPM22_SYSTEM.2d` |
 
 > [!NOTE]
-> Output locations are not yet fully standardised between scripts. `ROMCPY.ps1` expects `IPL.ROM` and `SUBCPU.ROM` under `src/vm/Lynxz80/build/`, while `build_ipl_rom.ps1` writes its primary copy under `tool/lynxZ80/bin/`.
+> `IPL.ROM` and `SUBCPU.ROM` are written to the common `tool/lynxZ80/bin/` location and mirrored to `src/vm/Lynxz80/build/` for compatibility. `ROMCPY.ps1` prefers the common output and falls back to the compatibility copy.
 
 ## 5. Current CP/M System-Disk Format
 
@@ -101,16 +101,17 @@ Use `-FontPath` to select a font from another location.
 | Directory entries | 128 |
 | DSM | 151 |
 | DRM | 127 |
+| EXM | 1 |
 
 These values correspond to the DPB in the current `tool/lynxZ80/build/bios/bios.asm`.
 
-## 6. Known Path and Format Mismatches
+## 6. Script Compatibility Notes
 
-The repository currently contains a few helper scripts that have not been fully aligned after directory/layout changes.
+The helper scripts are aligned with the current repository layout.
 
-- `build_cpm22_env.ps1` refers to `build\util` and `build\bin\cpmutil`, while the current tree contains local utility sources under `build/cpmutils/`.
-- `build_cpm22_system_disk.ps1` looks for optional COM files under `tool/lynxZ80/bin/cpmutils/`.
-- `diskeditor.ps1` targets an older 77-track, 26-sector, 128-byte-sector, 1 KB-block format and is not compatible with the current `CPM22_SYSTEM.2d`.
-- `ROMCPY.ps1` and `build_ipl_rom.ps1` use different default locations for `IPL.ROM`.
+- `build_cpm22_env.ps1` reads local utility sources from `build/cpmutils/` and writes commands to `bin/cpmutils/`.
+- `build_cpm22_system_disk.ps1` and `diskeditor.ps1` use the current 40-cylinder, two-sided, 2048-byte-block, EXM=1 `CPM22_SYSTEM.2d` format.
+- `diskeditor.ps1 -Format Legacy` retains access to the older 77-track, 26-sector, 128-byte-sector, 1 KB-block format.
+- `ROMCPY.ps1` supports x86/x64, Debug/Release/Both, and also copies `FONT.ROM` when it is available.
 
-See [tool/lynxZ80/README.md](tool/lynxZ80/README.md) for the current tool-by-tool details.
+See [tool/lynxZ80/README.md](tool/lynxZ80/README.md) for current command examples and options.
