@@ -41,7 +41,7 @@ Aktualaj helpaj skriptoj troviĝas en `tool/lynxZ80/`.
 - `ROMCPY.ps1`
 - `diskeditor.ps1`
 
-Kelkaj skriptoj ankoraŭ enhavas lokajn aŭ malnovajn dosierujojn. Legu [tool/lynxZ80/README.md](tool/lynxZ80/README.md) antaŭ uzo.
+La skriptoj nun sekvas la aktualan dosierujan aranĝon; AS/p2bin povas esti trovataj per PATH, kaj `diskeditor.ps1` defaŭlte uzas la nunan diskformaton kun laŭvola `-Format Legacy`. Vidu [tool/lynxZ80/README.md](tool/lynxZ80/README.md) por detaloj.
 
 ## Dokumentaro
 
