@@ -1,269 +1,186 @@
 # CP/M 2.2 BIOS Call Reference
 
-CP/M 2.2 の BIOS (Basic I/O System) は、CCP/BDOS から見えるハードウェア依存層である。Digital Research の Alteration Guide では、CP/M は CCP、BDOS、BIOS の 3 層に分けられ、BIOS だけが対象マシンのハードウェアに依存する部分として説明されている。
+この文書は、CP/M 2.2 BIOS の標準インターフェースと、eLynxZ80 の現行 BIOS 実装をまとめたリファレンスです。
 
-本メモは LynxZ80Sim 向けの実装確認用に、CP/M 2.2 BIOS の標準ジャンプベクタと各エントリの呼出規約を整理したもの。
+対象ソース:
 
-## 参照資料
-
-- Digital Research, `CP/M 2.2 Alteration Guide`, 1979.
-  - `https://deramp.com/downloads/mfe_archive/040-Software/Digital%20Research/CPM2-2/Manuals/CPM_2.2_Alteration_Guide_1979.pdf`
-- John Elliott, `CP/M information archive: BIOS`.
-  - `https://www.seasip.info/Cpm/bios.html`
-
-## 基本構造
-
-BIOS への入口は、BIOS 先頭に置かれるジャンプベクタである。標準の 20K CP/M では BIOS は `4A00H` から始まり、メモリサイズに応じて `b = memory_size - 20K` のバイアスを加えた `4A00H + b` が BIOS ベースになる。
-
-ジャンプベクタは 17 個の `JMP` 命令で構成される。各エントリは 3 バイトなので、エントリ番号 `n` のベクタオフセットは `n * 3` である。
-
-```asm
-BIOS:
-    JMP BOOT     ; 00
-    JMP WBOOT    ; 03
-    JMP CONST    ; 06
-    JMP CONIN    ; 09
-    JMP CONOUT   ; 0C
-    JMP LIST     ; 0F
-    JMP PUNCH    ; 12
-    JMP READER   ; 15
-    JMP HOME     ; 18
-    JMP SELDSK   ; 1B
-    JMP SETTRK   ; 1E
-    JMP SETSEC   ; 21
-    JMP SETDMA   ; 24
-    JMP READ     ; 27
-    JMP WRITE    ; 2A
-    JMP LISTST   ; 2D
-    JMP SECTRAN  ; 30
+```text
+tool/lynxZ80/build/bios/bios.asm
+tool/lynxZ80/build_cpm22_runtime.ps1
+tool/lynxZ80/build_cpm22_system_disk.ps1
 ```
 
-一部の機能は対象ハードウェアで未実装でもよいが、ジャンプベクタ上のエントリ自体は必ず存在する必要がある。未実装デバイスは単純な `RET`、`^Z` 返却、常時 ready などでスタブ化する。
+## 1. BIOS の位置付け
 
-## BIOS コール一覧
+CP/M 2.2 は、CCP、BDOS、BIOS から構成されます。BIOS はハードウェア依存部分を受け持ち、コンソール I/O、ディスク選択、セクタ I/O などを BDOS へ提供します。
 
-| # | Offset | Name | 入力 | 出力 | 概要 |
-|---:|---:|---|---|---|---|
-| 0 | `00H` | `BOOT` | なし | 戻らない | コールドブート初期化。ページゼロ、IOBYTE、デフォルトDMA等を設定し、通常はCCPへ入る。 |
-| 1 | `03H` | `WBOOT` | なし | 戻らない | ウォームブート。CCPを再ロードし、ページゼロを再設定してCCPへ入る。 |
-| 2 | `06H` | `CONST` | なし | `A=00H` または `A=FFH` | コンソール入力状態。文字なしなら `00H`、入力可能なら `FFH`。 |
-| 3 | `09H` | `CONIN` | なし | `A=文字` | コンソールから 1 文字入力。通常は文字が来るまで待つ。 |
-| 4 | `0CH` | `CONOUT` | `C=文字` | なし | コンソールへ 1 文字出力。 |
-| 5 | `0FH` | `LIST` | `C=文字` | なし | リストデバイス、通常はプリンタへ 1 文字出力。準備完了まで待ってよい。 |
-| 6 | `12H` | `PUNCH` | `C=文字` | なし | パンチデバイス、または補助出力へ 1 文字出力。CP/M 3 の `AUXOUT` 相当。 |
-| 7 | `15H` | `READER` | なし | `A=文字` | リーダデバイス、または補助入力から 1 文字入力。未実装なら `1AH` (`^Z`) を返す。 |
-| 8 | `18H` | `HOME` | なし | なし | 現在選択中ドライブのトラックを 0 に戻す。 |
-| 9 | `1BH` | `SELDSK` | `C=ドライブ番号`, `E=初回選択フラグ` | `HL=DPH` または `0000H` | ドライブ選択。`C=0` が A:、`1` が B:。選択不可なら `HL=0`。 |
-| 10 | `1EH` | `SETTRK` | `BC=トラック番号` | なし | 次のディスクI/O対象トラックを設定。CP/M 2.x では 16 ビット値。 |
-| 11 | `21H` | `SETSEC` | `BC=セクタ番号` | なし | 次のディスクI/O対象セクタを設定。CP/M 2.2 の論理セクタは 128 バイト単位。 |
-| 12 | `24H` | `SETDMA` | `BC=DMAアドレス` | なし | 次の `READ`/`WRITE` が使う 128 バイト転送先/転送元を設定。 |
-| 13 | `27H` | `READ` | 事前に `SELDSK`/`SETTRK`/`SETSEC`/`SETDMA` | `A=状態` | 現在のドライブ、トラック、セクタから DMA へ 128 バイト読み込む。 |
-| 14 | `2AH` | `WRITE` | `C=書込種別`, 事前に各設定 | `A=状態` | DMA から現在のドライブ、トラック、セクタへ 128 バイト書き込む。 |
-| 15 | `2DH` | `LISTST` | なし | `A=00H` または `A=FFH` | リストデバイス状態。未準備なら `00H`、準備完了なら `FFH`。 |
-| 16 | `30H` | `SECTRAN` | `BC=論理セクタ`, `DE=変換テーブル` | `HL=物理セクタ` | セクタスキュー変換。変換不要なら `HL=BC` または実装都合に応じた物理番号を返す。 |
-
-## 個別仕様
-
-### BOOT
-
-コールドスタート時に実行される。最低限、次を行う。
-
-- ページゼロの `0000H` に `JMP WBOOT` を設定する。
-- `0005H` に BDOS 呼出用ジャンプを設定する。
-- デフォルトDMAを通常 `0080H` に設定する。
-- 必要なデバイス、ディスク、割り込み状態を初期化する。
-- CCP へ制御を渡す。
-
-BIOS 実装では `BOOT` と `WBOOT` が戻らない前提で書かれることが多い。
-
-### WBOOT
-
-ウォームスタート時に実行される。`^C`、BDOSからの再起動、プログラム終了後の復帰などで使われる。通常は CCP をシステムトラックから再ロードし、ページゼロを再構築し、ログインドライブを設定して CCP に入る。
-
-### CONST
-
-コンソール入力のポーリングである。
-
-- `A=00H`: 入力文字なし
-- `A=FFH`: 入力文字あり
-
-`CONIN` と違い、文字が来るまで待ってはいけない。
-
-### CONIN
-
-コンソールから 1 文字を入力し、ASCII 文字を `A` に返す。入力がない場合は待つ。CP/M の単純文字I/Oは ASCII 前提で、高位ビットは 0 として扱うのが標準である。
-
-### CONOUT
-
-`C` の文字をコンソールに出力する。端末制御、改行変換、表示待ちなどは機種依存でよいが、BDOS から見て 1 文字出力として動作すること。
-
-### LIST
-
-`C` の文字をリストデバイスへ送る。通常はプリンタである。プリンタが未実装なら、単に捨てて `RET` するスタブでもよい。
-
-### PUNCH
-
-`C` の文字をパンチデバイス、または補助出力へ送る。現代実装やエミュレータでは未使用のことが多い。未実装なら捨てて `RET` する。
-
-### READER
-
-リーダデバイス、または補助入力から 1 文字を読み、`A` に返す。未実装時は EOF を意味する `1AH` (`^Z`) を返すのが標準的である。
-
-### HOME
-
-現在選択中のディスクをトラック 0 に位置付ける。物理的なシークをここで行ってもよいが、エミュレータでは内部の現在トラック変数を 0 にするだけでよい。
-
-### SELDSK
-
-`C` で指定されたドライブを選択する。
-
-- `C=0`: A:
-- `C=1`: B:
-- ...
-- `C=15`: P:
-
-CP/M 2.2 では `SELDSK` は選択したドライブの Disk Parameter Header (DPH) のアドレスを `HL` に返す。ドライブが存在しない、または選択できない場合は `HL=0000H` を返す。
-
-`E` はログイン状態に関する情報を持つ。下位ビットが 0 なら、最後の cold/warm start 以降の初回選択として扱う。下位ビットが 1 なら、以前にログイン済みのディスクとして扱い、必要なら物理アクセスを遅延してよい。
-
-Digital Research のガイドでは、`SELDSK` 呼出時点では物理選択を延期し、実際の `READ`/`WRITE` まで待つ実装も推奨されている。ディスク選択だけが発生し、I/O が続かない場合があるためである。
-
-### SETTRK
-
-`BC` の 16 ビット値を次回ディスクI/Oの論理トラック番号として保存する。CP/M 1.x では `C` の 8 ビット値だったが、CP/M 2.x では `BC` を使う。
-
-### SETSEC
-
-`BC` の 16 ビット値を次回ディスクI/Oの論理セクタ番号として保存する。CP/M 2.2 の BDOS から BIOS へ渡されるセクタは 128 バイト論理セクタ単位である。
-
-実ディスクの物理セクタサイズが 128 バイトより大きい場合は、BIOS 側でブロッキング/デブロッキングを行う。
-
-### SETDMA
-
-`BC` の 16 ビット値を DMA アドレスとして保存する。以後の `READ` はここへ 128 バイトを書き込み、`WRITE` はここから 128 バイトを読み出す。
-
-初期DMAは通常 `0080H` である。これはコマンドラインバッファ/デフォルトDTAとしても使われる。
-
-### READ
-
-現在選択中のドライブ、現在トラック、現在セクタ、現在DMAアドレスを使って 128 バイトを読み込む。
-
-返却値:
-
-- `A=00H`: 成功
-- `A=01H`: 回復不能エラー
-- `A=FFH`: メディア変更
-
-CP/M 2.2 の多くの実装では `00H` と非ゼロエラーのみを使う。エミュレータ実装では、存在しないドライブ、範囲外トラック/セクタ、イメージI/O失敗を `01H` に集約してよい。
-
-### WRITE
-
-現在DMAアドレスから 128 バイトを読み、現在選択中のドライブ、現在トラック、現在セクタへ書き込む。
-
-入力 `C` は BDOS が渡す書込種別で、ブロッキング/デブロッキング最適化に使える。
-
-- `C=0`: 通常書込。遅延書込可能。
-- `C=1`: ディレクトリセクタ書込。即時反映すべき。
-- `C=2`: 新規データブロックの先頭セクタ書込。事前読み込みを省略可能。
-
-返却値:
-
-- `A=00H`: 成功
-- `A=01H`: 回復不能エラー
-- `A=02H`: 読み取り専用ディスク
-- `A=FFH`: メディア変更
-
-### LISTST
-
-リストデバイスの状態を返す。
-
-- `A=00H`: 未準備
-- `A=FFH`: 準備完了
-
-プリンタ未実装のエミュレータでは、常時 `FFH` として文字を捨てる実装、または常時 `00H` とする実装のどちらもあり得る。ただし、アプリケーションが待ち続ける可能性を避けるなら `FFH` が扱いやすい。
-
-### SECTRAN
-
-論理セクタ番号を物理セクタ番号へ変換する。
-
-入力:
-
-- `BC`: 論理セクタ番号
-- `DE`: 変換テーブルのアドレス。変換テーブルなしなら `0000H` の場合がある。
-
-出力:
-
-- `HL`: 物理セクタ番号
-
-セクタスキューを使うディスクでは、`DE` のテーブルを使って変換する。エミュレータの内部ディスク表現がすでに論理順なら、`HL=BC` としてよい。
-
-## DPH: Disk Parameter Header
-
-`SELDSK` は選択ドライブの DPH アドレスを `HL` に返す。CP/M 2.2 の DPH はドライブごとに置かれ、BDOS がディスク構造を理解するための入口になる。
-
-一般的な DPH 構造:
-
-| Offset | Size | Field | 内容 |
-|---:|---:|---|---|
-| `00H` | word | `XLT` | セクタ変換テーブルアドレス。不要なら `0000H`。 |
-| `02H` | word | scratch | BDOS作業用。通常 0 初期化。 |
-| `04H` | word | scratch | BDOS作業用。通常 0 初期化。 |
-| `06H` | word | scratch | BDOS作業用。通常 0 初期化。 |
-| `08H` | word | `DIRBUF` | 128 バイトのディレクトリバッファ。 |
-| `0AH` | word | `DPB` | Disk Parameter Block アドレス。 |
-| `0CH` | word | `CSV` | チェックベクタアドレス。固定媒体では 0 の場合あり。 |
-| `0EH` | word | `ALV` | アロケーションベクタアドレス。 |
-
-## DPB: Disk Parameter Block
-
-DPB はディスク容量、ブロックサイズ、ディレクトリエントリ数などを定義する。
-
-| Field | Size | 内容 |
-|---|---:|---|
-| `SPT` | word | 1 トラックあたりの 128 バイト論理セクタ数。 |
-| `BSH` | byte | ブロックシフト値。 |
-| `BLM` | byte | ブロックマスク値。 |
-| `EXM` | byte | エクステントマスク。 |
-| `DSM` | word | 最大データブロック番号。総ブロック数は `DSM + 1`。 |
-| `DRM` | word | 最大ディレクトリエントリ番号。総数は `DRM + 1`。 |
-| `AL0` | byte | ディレクトリ用予約ブロックビット上位。 |
-| `AL1` | byte | ディレクトリ用予約ブロックビット下位。 |
-| `CKS` | word | ディレクトリチェックベクタサイズ。固定媒体なら 0。 |
-| `OFF` | word | 予約トラック数。OS領域をスキップするために使う。 |
-
-`OFF` は `SETTRK` で設定された論理トラックに加算される値として使える。システムトラックをディレクトリ/データ領域から隠す用途で重要である。
-
-## LynxZ80Sim 実装チェックリスト
-
-- BIOS先頭のジャンプベクタは 17 エントリ、順序固定。
-- `BOOT` / `WBOOT` は戻らず、ページゼロの `JMP WBOOT` と `JMP BDOS` を正しく作る。
-- `CONST` / `LISTST` は `00H` または `FFH` を返す。
-- `CONIN` / `READER` は文字を `A` に返す。
-- `CONOUT` / `LIST` / `PUNCH` は文字を `C` から受け取る。
-- `SELDSK` は DPH アドレスを `HL` に返し、無効ドライブは `HL=0`。
-- `SETTRK` / `SETSEC` / `SETDMA` は `BC` を保存する。
-- `READ` / `WRITE` は常に 128 バイト論理セクタ単位で BDOS と受け渡す。
-- `WRITE` の `C=1` はディレクトリ更新なので、遅延書込を行う場合でもフラッシュ対象にする。
-- `SECTRAN` は変換不要なら `HL=BC` でよい。
-- DPH/DPB/ALV/CSV/DIRBUF は BDOS から参照されるため、BIOS常駐領域または消えないRAM領域に置く。
-
-## 最小スタブ方針
-
-ディスクI/Oを除き、未使用デバイスは以下でよい。
+BIOS の先頭には 17 個のジャンプエントリを配置します。各エントリは 3 bytes です。
 
 ```asm
-LIST:
-PUNCH:
-    RET
-
-READER:
-    LD A,1AH
-    RET
-
-LISTST:
-    LD A,0FFH
-    RET
+BOOT:    JP BIOS_BOOT
+WBOOT:   JP BIOS_WBOOT
+CONST:   JP BIOS_CONST
+CONIN:   JP BIOS_CONIN
+CONOUT:  JP BIOS_CONOUT
+LIST:    JP BIOS_LIST
+PUNCH:   JP BIOS_PUNCH
+READER:  JP BIOS_READER
+HOME:    JP BIOS_HOME
+SELDSK:  JP BIOS_SELDSK
+SETTRK:  JP BIOS_SETTRK
+SETSEC:  JP BIOS_SETSEC
+SETDMA:  JP BIOS_SETDMA
+READ:    JP BIOS_READ
+WRITE:   JP BIOS_WRITE
+PRSTAT:  JP BIOS_PRSTAT
+SECTRN:  JP BIOS_SECTRN
 ```
 
-ただし、`CONST`、`CONIN`、`CONOUT`、`SELDSK`、`SETTRK`、`SETSEC`、`SETDMA`、`READ`、`WRITE`、`SECTRAN` は BDOS の通常動作に直結するため、正しく実装する必要がある。
+`PRSTAT` は一般的な CP/M 資料で `LISTST` と記載されるエントリ、`SECTRN` は `SECTRAN` と記載されるエントリに相当します。
 
+## 2. BIOS コール一覧
+
+| No. | Offset | エントリ | 入力 | 出力 | 機能 |
+| ---: | ---: | --- | --- | --- | --- |
+| 0 | `00h` | `BOOT` | なし | 戻らない | コールドブート |
+| 1 | `03h` | `WBOOT` | なし | 戻らない | ウォームブート |
+| 2 | `06h` | `CONST` | なし | `A=00h/FFh` | コンソール入力状態 |
+| 3 | `09h` | `CONIN` | なし | `A=文字` | コンソール入力 |
+| 4 | `0Ch` | `CONOUT` | `C=文字` | なし | コンソール出力 |
+| 5 | `0Fh` | `LIST` | `C=文字` | なし | リストデバイス出力 |
+| 6 | `12h` | `PUNCH` | `C=文字` | なし | 補助出力 |
+| 7 | `15h` | `READER` | なし | `A=文字` | 補助入力 |
+| 8 | `18h` | `HOME` | なし | なし | トラック 0 を選択 |
+| 9 | `1Bh` | `SELDSK` | `C=drive`, `E=login flag` | `HL=DPH` | ドライブ選択 |
+| 10 | `1Eh` | `SETTRK` | `BC=track` | なし | トラック設定 |
+| 11 | `21h` | `SETSEC` | `BC=sector` | なし | 論理セクタ設定 |
+| 12 | `24h` | `SETDMA` | `BC=address` | なし | DMA アドレス設定 |
+| 13 | `27h` | `READ` | 事前設定値 | `A=status` | 128-byte 論理セクタ読込 |
+| 14 | `2Ah` | `WRITE` | `C=write type` | `A=status` | 128-byte 論理セクタ書込 |
+| 15 | `2Dh` | `PRSTAT` | なし | `A=00h/FFh` | リストデバイス状態 |
+| 16 | `30h` | `SECTRN` | `BC=logical`, `DE=XLT` | `HL=physical` | セクタ変換 |
+
+## 3. コンソール I/O
+
+現行 BIOS はコンソール I/O に Z80 SIO を使用します。
+
+キーボード入力はエミュレータ側で SIO-B へ供給されます。BIOS の `CONST` / `CONIN` はこの経路から CP/M のコンソール入力を処理します。
+
+`CONOUT` は通常のコンソール文字出力に加えて、サブ CPU との MINSUB 経路を使用する表示制御にも関係します。
+
+`LIST` と `PUNCH` は現行 BIOS では実質的にスタブです。`PRSTAT` は `FFh` を返します。
+
+## 4. ディスク I/O
+
+### 4.1 ドライブ
+
+eLynxZ80 は 2 ドライブを実装しています。
+
+| CP/M | エミュレータ |
+| --- | --- |
+| A: | Drive 0 |
+| B: | Drive 1 |
+
+`SELDSK` は選択したドライブの DPH を返し、無効なドライブでは `HL=0000h` を返します。
+
+### 4.2 READ / WRITE
+
+BDOS と BIOS の間では 128-byte 論理セクタ単位でデータを受け渡します。
+
+`READ` / `WRITE` は eLynxZ80 の FDC 経路を使用して実ディスクイメージへアクセスします。現行 BIOS では FDC 操作に失敗した場合 `A=01h`、成功した場合 `A=00h` を返します。
+
+## 5. DPH
+
+現行 BIOS は A: / B: 用に `DPH0` と `DPH1` を持ち、両方が共通の `DPB0` とセクタ変換表を参照します。
+
+構造は次の標準 CP/M 2.2 DPH 形式です。
+
+| Offset | Field | 内容 |
+| ---: | --- | --- |
+| `00h` | XLT | セクタ変換表 |
+| `02h` | scratch 1 | BDOS 作業領域 |
+| `04h` | scratch 2 | BDOS 作業領域 |
+| `06h` | scratch 3 | BDOS 作業領域 |
+| `08h` | DIRBUF | 128-byte ディレクトリバッファ |
+| `0Ah` | DPB | Disk Parameter Block |
+| `0Ch` | CSV | チェックベクタ |
+| `0Eh` | ALV | アロケーションベクタ |
+
+## 6. 現行 DPB
+
+`bios.asm` の `DPB0` は次の値です。
+
+| Field | 値 | 意味 |
+| --- | ---: | --- |
+| SPT | 64 | 1 シリンダあたり 64 × 128-byte 論理セクタ |
+| BSH | 4 | 2 KB allocation block |
+| BLM | 15 | block mask |
+| EXM | 1 | extent mask |
+| DSM | 151 | 最大データブロック番号 |
+| DRM | 127 | 最大ディレクトリエントリ番号 |
+| AL0 | `C0h` | ディレクトリ用予約ブロック |
+| AL1 | `00h` | 同上 |
+| CKS | 32 | directory check vector size |
+| OFF | 2 | 予約シリンダ数 |
+
+この DPB は `build_cpm22_system_disk.ps1` のディスク形式と対応します。
+
+### 6.1 物理ディスク形式
+
+| 項目 | 値 |
+| --- | ---: |
+| シリンダ | 40 |
+| 面 | 2 |
+| セクタ / 面 | 16 |
+| 物理セクタ | 256 bytes |
+| 1 シリンダ | 8192 bytes |
+| 総容量 | 327680 bytes |
+| システム予約 | 2 シリンダ |
+| allocation block | 2048 bytes |
+| directory entries | 128 |
+
+物理 1 シリンダは 2 sides × 16 sectors × 256 bytes = 8192 bytes です。CP/M の 128-byte 論理セクタでは SPT=64 になります。
+
+## 7. セクタ変換
+
+現行 BIOS の `SECTRAN` テーブルは 1～64 の連続値で、実質的にインターリーブなしの順次マッピングです。
+
+`BIOS_SECTRN` は変換テーブルアドレスが 0 の場合には identity mapping として処理します。
+
+## 8. BIOS ワーク領域
+
+resident BIOS の生成時、`build_cpm22_runtime.ps1` は BIOS のワーク領域を `F900h` から配置し、コード領域や cold boot 表示領域と重ならないことを検証します。
+
+主なワーク領域には次が含まれます。
+
+- DPH scratch
+- CSV
+- ALV
+- DIRBUF
+- 現在ドライブ / トラック / セクタ / DMA アドレスなどの BIOS 状態
+
+## 9. コールドブートとウォームブート
+
+CP/M ソースへ適用する `patch.diff` は、コールドブート時だけ sign-on を表示する処理を追加します。
+
+ウォームブートは `CBASE+3` から入り、cold boot 専用 sign-on を再表示しません。
+
+現行パッチの sign-on は eLynxZ80 / Lynx 向け CP/M 2.2 であることを表示します。
+
+## 10. 実装確認項目
+
+BIOS を変更した場合は、最低限次を確認してください。
+
+- 17 個の BIOS ジャンプエントリの順序が変わっていないこと
+- `BOOT` / `WBOOT` がページゼロを正しく設定すること
+- `CONST` が非ブロッキングであること
+- `CONIN` / `CONOUT` で CP/M コンソール I/O が動作すること
+- A: / B: の DPH が有効であること
+- `SETTRK` / `SETSEC` / `SETDMA` の値が `READ` / `WRITE` に反映されること
+- DPB が `CPM22_SYSTEM.2d` の形式と一致すること
+- cold boot / warm boot の双方が正常に CCP へ到達すること
+
+## 11. 参考資料
+
+- Digital Research, *CP/M 2.2 Alteration Guide*
+- John Elliott, *CP/M information archive: BIOS*

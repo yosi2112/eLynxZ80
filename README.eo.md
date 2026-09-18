@@ -1,130 +1,53 @@
-# Lynx Emulator 'eLynxZ80' on Common Source Code Project
+# eLynxZ80
 
-yosi kun OpenAI Codex  
-Versio 1.0 Beta 1(260521)
+eLynxZ80 estas emulilo de la du-Z80 CP/M-komputilo “Lynx”, konstruita sur la Common Source Code Project (CSCP).
 
-## 1. Kio estas tio?
+Ĉi tiu Esperanto-dosiero estas mallongigita traduko. Por la plena kaj plej aktuala manlibro vidu [README.md](README.md) aŭ [README.en-US.md](README.en-US.md).
 
-'eLynxZ80' estas emulila realigo por "Lynx", la duobla Z80 CP/M-maŝino kreita de Chiaki Nakajima, konstruita sur la "Common Source Code Project" de Takeda Toshiya.
+## Nuna aranĝo
 
-Tiu pakaĵo enhavas la virtual-maŝinan realigon por Lynx, projekton por Visual Studio, kaj helpilojn por generi BIOS/sub-CPU-ROMojn, tiparan ROMon, kaj CP/M 2.2-diskan bildon.
+- Ĉefa CPU kaj sub-CPU: Z80
+- Ĉefa memoro: 64 KB
+- `IPL.ROM`: 8 KB
+- `SUBCPU.ROM`: 8 KB
+- `FONT.ROM`: 8 KB
+- Ekrano: 640 × 400
+- Du uPD7220-kongruaj GDC-oj
+- Du 2D disketiloj
+- CP/M 2.2
 
-Plejparto de la kodo estis kreita kunlabore kun Codex (AI). La sola materialo ricevita de la Lynx-aŭtoro estis la cirkvitdiagramo; la ROM-fontkodo, krom FONT.ROM, ankaŭ estis kreita kunlabore kun AI.
+Por normala funkciado metu `IPL.ROM`, `SUBCPU.ROM` kaj `FONT.ROM` apud `lynxz80.exe`.
 
-Pri la "Common Source Code Project", vidu [Common Source Code Project](http://takeda-toshiya.my.coocan.jp/common/index.html).
+La nuna CP/M-disk-konstruilo kreas:
 
-## 2. Kial ĝi havas alian nomon?
+```text
+tool/lynxZ80/bin/CPM22_SYSTEM.2d
+```
 
-La originala maŝino emulata ĉi tie estas "Lynx", la duobla Z80 CP/M-maŝino kreita de Chiaki Nakajima. Tamen, nur la nomo "Lynx" facile povas esti konfuzata kun ATARI LYNX kaj kun aliaj komputiloj aŭ emuliloj uzantaj la saman nomon.
+La malnova nomo `CPM22_SYSTEM.IMG` ne estas la nuna eligo.
 
-Pro tio ĉi tiu emulilo uzas la distribuan nomon 'eLynxZ80', kombinante "e" por emulilo kun Z80, la centra CPU-familio de la cela maŝino. Pro historiaj projektaj nomoj, la fontarbo kaj projektdosieroj povas ankoraŭ enhavi formojn kiel "LynxZ80" kaj "lynxz80"; ĉiuj indikas la saman emulilon.
+## Konstruado
 
-Pri la originala Lynx, vidu la aŭtoran paĝon "[Dual Z80 CP/M system [Lynx]](https://www.chiaki.cc/Lynx/index_en.htm)".
+La deponejo ne enhavas la tutan komunan fontaron de CSCP. La projekto `vc++2017/lynxz80.vcxproj` devas esti uzata kun kongrua CSCP-fontarbo.
 
-## 3. Kio necesas?
+Aktualaj helpaj skriptoj troviĝas en `tool/lynxZ80/`.
 
-'eLynxZ80' bezonas la jenajn erojn.
+- `build_ipl_rom.ps1`
+- `build_subcpu_rom.ps1`
+- `build_fontrom.ps1`
+- `build_cpm22_env.ps1`
+- `build_cpm22_runtime.ps1`
+- `build_cpm22_system_disk.ps1`
+- `ROMCPY.ps1`
+- `diskeditor.ps1`
 
-### 3.1 Aparataro
+Kelkaj skriptoj ankoraŭ enhavas lokajn aŭ malnovajn dosierujojn. Legu [tool/lynxZ80/README.md](tool/lynxZ80/README.md) antaŭ uzo.
 
-Funkciado estas celita por Windows 10 aŭ pli nova, 32/64-bitaj eldonoj.
+## Dokumentaro
 
-### 3.2 Plenumebla dosiero kaj ROM-bildaj dosieroj
+- [Programming Manual](src/vm/Lynxz80/docs/Programing%20Manual/README.md)
+- [Build requirements](Requirements_EO.md)
 
-Por lanĉi la emulilon, metu la jenajn dosierojn en la saman dosierujon kiel la plenumebla dosiero `lynxz80.exe`.
+## Permesilo
 
-- `IPL.ROM`  
-  IPL/BIOS-ROM por la ĉefa CPU.
-- `SUBCPU.ROM`  
-  ROM por la sub-CPU.
-- `FONT.ROM`  
-  Tipara ROM por ekrana eligo. Se tiu dosiero ne ekzistas, la emulilo uzas siajn enkonstruitajn komencajn valorojn, sed generita dosiero estas rekomendata por ĝusta montrado.
-
-### 3.3 Diska bilddosiero
-
-Por lanĉi CP/M 2.2, enmetu la generitan diskan bildon `CPM22_SYSTEM.IMG` kiel disketon.
-
-La maŝino supozas du-diskan agordon.
-
-## 4. Kiujn klavojn premi?
-
-'eLynxZ80' traktas PC-klavaran enigon kiel serian enigon.
-
-| Klavo | Enigo |
-| - | - |
-| `A-Z` | Literaj klavoj |
-| `0-9` | Ciferaj klavoj |
-| `Enter` | CR |
-| `BackSpace` | BS |
-| `Tab` | HT |
-| `Esc` | ESC |
-| `Space` | Spaco |
-| `Delete` | DEL |
-| `Ctrl+A` - `Ctrl+Z` | Stirkodoj |
-
-Simbolaj klavoj estas tradukataj al ASCII-signoj ekvivalentaj al usona klavara aranĝo. La statoj de Caps Lock kaj Kana Lock ankaŭ estas tenataj en la emulilo.
-
-## 5. Kiel konstrui?
-
-La fontdosieroj inkluditaj en tiu pakaĵo povas esti konstruitaj per surmeto al la fontarbo de la "Common Source Code Project". Malfermu `vc++2017/lynxz80.vcxproj` per Visual Studio.
-
-La distribuitaj projektaj agordoj supozas la jenan medion.
-
-- Visual Studio 2019 / Build Tools 2019
-- Platform Toolset `v141`
-- Windows 10 SDK `10.0.18362.0`
-- `winmm.lib` / `imm32.lib`
-
-La jenaj iloj necesas por generi ROMojn kaj CP/M-diskajn bildojn.
-
-- Windows PowerShell
-- Macro Assembler AS (`asw.exe`)
-- `p2bin.exe`
-
-AS estas akirebla de la jenaj paĝoj.
-
-- [The Macro Assembler AS](http://john.ccac.rwth-aachen.de:8000/as/)
-
-Helpaj skriptoj troviĝas sub `tool/lynxZ80`.
-
-| Skripto | Priskribo |
-| - | - |
-| `buildall.ps1` | Generas la BIOS-ROMon, sub-CPU-ROMon, CP/M 2.2-diskon, kaj CP/M-utilaĵojn sinsekve. |
-| `build_biosrom.ps1` | Generas `src/vm/Lynxz80/build/IPL.ROM`. |
-| `build_subcpu_rom.ps1` | Generas `src/vm/Lynxz80/build/SUBCPU.ROM`. |
-| `build_fontrom.ps1` | Generas `src/vm/Lynxz80/build/font/FONT.ROM`. |
-| `ROMCPY.ps1` | Kopias generitajn ROMojn al `vc++2017/bin/x86/Debug` aŭ `vc++2017/bin/x86/Release`. |
-
-Generado de la tipara ROM aparte bezonas `KH-Dot-Dougenzaka-16.ttf`. Tiu deponejo ne redistribuas la tiparan dosieron nek generitajn tipar-ROM-datumojn. Por konstrui la tiparan ROMon, elŝutu `KH-Dot-Dougenzaka-16.ttf` aparte de ĝia distribuopaĝo kaj metu ĝin sub `tool/lynxZ80/build/font`, aŭ donu ĝian lokon al `build_fontrom.ps1` per `-FontPath`.
-
-`KH-Dot-Dougenzaka-16.ttf` estas aparte licencita laŭ la SIL Open Font License 1.1. Generitaj tipar-ROM-datumoj derivitaj de tiu tiparo estu traktataj laŭ la sama permesilo kiam redistribuitaj.
-
-La tiparo estas akirebla de la jenaj paĝoj.
-
-- [KH Dot Font Series](http://jikasei.me/font/kh-dotfont/)
-- [KH Dot Font - Font Meme](https://fontmeme.com/fonts/kh-dot-font/)
-
-Por generi la CP/M 2.2-diskon, ankaŭ necesas `cpm2-asm.zip` kaj `cpm22-b.zip`. Metu tiujn dosierojn en `tool/lynxZ80/build/arch`.
-
-CP/M-rilataj dosieroj estas akireblaj de la jenaj paĝoj.
-
-- [The Unofficial CP/M Web Site](http://www.cpm.z80.de/)
-
-Pri la Lynx-maŝino mem, vidu ankaŭ la jenajn paĝojn.
-
-- [放課後の電子工作　～　会社でハンダ付け、自宅でもハンダ付け　～](https://www.chiaki.cc/)
-- [Dual Z80 CP/M system [Lynx]](https://www.chiaki.cc/Lynx/index_en.htm)
-
-## 6. Kopirajta noto
-
-Tiu pakaĵo enhavas fontdosierojn bazitajn sur la "Common Source Code Project" kaj fontdosierojn aldonitajn por Lynx Z80.
-
-Uzo kaj redistribuo estas regataj de la kopirajtaj notoj en ĉiu fontdosiero kaj de la metodoj kaj kondiĉoj difinitaj de la prizorganto de la "Common Source Code Project".
-
-Eksteraj arkivoj kaj normaj komandosieroj rilataj al CP/M 2.2 estas kovritaj de apartaj rajtoj kaj kondiĉoj. Uzantoj mem devas kontroli la laŭleĝan fonton kaj uzkondiĉojn por tiuj materialoj.
-
-## 7. Kontakto
-
-X (antaŭe Twitter): <https://x.com/yosi2112>
-
-Pri la "Common Source Code Project", vidu [Common Source Code Project](http://takeda-toshiya.my.coocan.jp/common/index.html).
+La radika [LICENSE](LICENSE) enhavas GNU General Public License Version 3. Triaj fontoj kaj datumoj povas havi apartajn kondiĉojn.

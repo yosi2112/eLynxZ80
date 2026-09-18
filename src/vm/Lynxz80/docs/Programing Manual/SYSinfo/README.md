@@ -1,199 +1,280 @@
-# LynxZ80Sim System Information
+# eLynxZ80 System Information
 
-LynxZ80Sim のプログラミング用システム情報メモです。本文書は、現在のエミュレータ実装から確認できるメインCPU側のメモリマップとI/Oポート割り当てを中心に整理します。サブCPU側の情報は付録としてまとめます。
+この文書は、現行 eLynxZ80 実装の CPU、メモリ、I/O、表示、フロッピー、MAIN/SUB 通信をまとめた技術リファレンスです。
 
-この文書の主な参照元は以下です。
-
-- `src/vm/Lynxz80/Membus.cpp`
-- `src/vm/Lynxz80/Membus.h`
-- `src/vm/Lynxz80/LynxZ80.cpp`
-- `src/vm/Lynxz80/LynxZ80.h`
-- `src/vm/Lynxz80/display.h`
-- `src/vm/Lynxz80/floppy.cpp`
-
-## メインCPUメモリマップ
-
-メインCPUは Z80 で、アドレス空間は 64KB です。実装上は `MEMBUS` が RAM 全域を持ち、起動時および `ROMEN` 有効時のみ 0x0000-0x1fff に ROM を重ねます。
-
-| アドレス範囲 | サイズ | 内容 | R/W | 備考 |
-|---|---:|---|---|---|
-| `0000h-1FFFh` | 8KB | IPL/BIOS ROM | R | `ROMEN=1` のとき有効。`IPL.ROM`, `MAIN.ROM`, `BOOT.ROM`, `BASIC.ROM` の順で読み込み候補になります。 |
-| `0000h-FFFFh` | 64KB | メインRAM | R/W | 常時存在します。ROM有効時は `0000h-1FFFh` の読み出しだけROMに隠れます。 |
-
-### ROMEN
-
-`ROMEN` は FDD制御用 PIO-B の bit 7 から `FLOPPY` 経由で `MEMBUS` へ渡されます。
-
-| 値 | 動作 |
-|---:|---|
-| `1` | `0000h-1FFFh` をROM読み出しにします。リセット直後の既定値です。 |
-| `0` | ROMを外し、`0000h-FFFFh` 全域をRAMとして読み書きします。 |
-
-## メインCPU I/Oポート一覧
-
-メインCPU側のI/Oデコードは、基本的に `20h-3Fh` の範囲だけを対象にします。`3Ch-3Fh` の MINSUB ブリッジだけは先に判定されます。
-
-デコード式は以下です。
+主な参照ソース:
 
 ```text
-I/O decoder enabled: (port & E0h) == 20h
-group             : (port >> 2) & 07h
-reg               : port & 03h
+src/vm/Lynxz80/LynxZ80.cpp
+src/vm/Lynxz80/LynxZ80.h
+src/vm/Lynxz80/Membus.cpp
+src/vm/Lynxz80/display.cpp
+src/vm/Lynxz80/floppy.cpp
+src/vm/Lynxz80/keyboard.cpp
+src/vm/Lynxz80/serial.cpp
 ```
 
-| ポート範囲 | group | デバイス | レジスタ | R/W | 概要 |
-|---|---:|---|---|---|---|
-| `20h-23h` | 0 | Z80 SIO | `sio_reg(port)` | R/W | シリアル/キーボード系。SIO-B read data/status はキーボードFIFOで補助されます。 |
-| `24h-27h` | 1 | Z80 CTC | `port & 03h` | R/W | タイマ/割り込み制御。メインCPUの割り込み系に接続されます。 |
-| `28h-2Bh` | 2 | Z80 DMA | 実装上 `0` | R/W | DMA制御。現実装では全レジスタアクセスが `dma->read/write_io8(0)` へ集約されています。 |
-| `2Ch-2Fh` | 3 | MB8877 FDC | `port & 03h` | R/W | フロッピーディスクコントローラ。 |
-| `30h-33h` | 4 | Z80 PIO | `pio_reg(port)` | R/W | FDD制御ラッチ、ROMEN制御。 |
-| `34h-37h` | 5 | 未使用 | - | - | 現実装では未接続です。 |
-| `38h-3Bh` | 6 | 未使用 | - | - | 現実装では未接続です。 |
-| `3Ch-3Fh` | 7 | MINSUB bridge | bridge | R/W | メインCPUからサブCPUへの通信。 |
+## 1. 基本仕様
 
-未接続ポートの読み出し値は `FFh` です。
+| 項目 | 実装値 |
+| --- | --- |
+| メイン CPU | Z80 |
+| サブ CPU | Z80 |
+| CPU clock | 4 MHz |
+| frame rate | 56.42 fps |
+| lines / frame | 440 |
+| 画面 | 640 × 400 |
+| GDC horizontal frequency | 24830 Hz |
+| フロッピードライブ | 2 |
+| drive type | 2D |
+| rotation | 300 rpm |
+| recording | FM |
 
-## SIOポート詳細
+## 2. メイン CPU メモリマップ
 
-SIOの下位2ビットは、実装内で以下のように入れ替えてから Z80SIO へ渡されます。
+メイン CPU のアドレス空間は 64 KB です。
+
+`MEMBUS` は 64 KB RAM を常時保持し、ROM が有効な間だけ `0000h-1FFFh` の読込みへ 8 KB IPL ROM を重ねます。
+
+| アドレス | サイズ | 内容 | R/W |
+| --- | ---: | --- | --- |
+| `0000h-1FFFh` | 8 KB | `IPL.ROM` | R、ROMEN=1 の場合 |
+| `0000h-FFFFh` | 64 KB | RAM | R/W |
+
+現行実装で読み込むメイン ROM のファイル名は `IPL.ROM` です。
+
+### 2.1 ROM が見つからない場合
+
+起動時に ROM バッファは HALT を主体とする安全な内容で初期化され、その後 `IPL.ROM` の読込みを試みます。
+
+したがって、ファイルがない場合でもホスト側エミュレータが直ちに異常終了することは避けられますが、Lynx の IPL としては動作しません。
+
+### 2.2 ROMEN
+
+リセット直後は `ROMEN=1` です。
+
+PIO-B bit 7 が FLOPPY インターフェースを介して `MEMBUS` の ROMEN 信号へ接続されています。
+
+| ROMEN | 動作 |
+| ---: | --- |
+| 1 | `0000h-1FFFh` の読込みを ROM にする |
+| 0 | `0000h-FFFFh` を RAM としてアクセスする |
+
+## 3. メイン CPU I/O
+
+メイン I/O デコーダは基本的に `20h-3Fh` を対象とします。`3Ch-3Fh` の MINSUB は優先して判定されます。
+
+```text
+decoder enabled : (port & E0h) == 20h
+group           : (port >> 2) & 07h
+register        : port & 03h
+```
+
+| Port | Group | デバイス | 備考 |
+| --- | ---: | --- | --- |
+| `20h-23h` | 0 | Z80 SIO | serial / keyboard |
+| `24h-27h` | 1 | Z80 CTC | timer / interrupt |
+| `28h-2Bh` | 2 | Z80 DMA | 現行実装は register 0 へ集約 |
+| `2Ch-2Fh` | 3 | MB8877 FDC | status/command, track, sector, data |
+| `30h-33h` | 4 | Z80 PIO | floppy control / ROMEN |
+| `34h-37h` | 5 | 未接続 | read=`FFh` |
+| `38h-3Bh` | 6 | 未接続 | read=`FFh` |
+| `3Ch-3Fh` | 7 | MINSUB | main/sub bridge |
+
+## 4. SIO
+
+SIO の下位 2 bit は次のように入れ替えて Z80 SIO 実装へ渡されます。
 
 ```text
 sio_reg = ((reg & 01h) << 1) | ((reg & 02h) >> 1)
 ```
 
-| CPUポート | `reg` | `sio_reg` | 備考 |
-|---:|---:|---:|---|
-| `20h` | 0 | 0 | Z80SIO 実装側のレジスタ0へ接続 |
-| `21h` | 1 | 2 | Z80SIO 実装側のレジスタ2へ接続 |
-| `22h` | 2 | 1 | Z80SIO 実装側のレジスタ1へ接続 |
-| `23h` | 3 | 3 | Z80SIO 実装側のレジスタ3へ接続 |
+| CPU port | SIO reg |
+| ---: | ---: |
+| `20h` | 0 |
+| `21h` | 2 |
+| `22h` | 1 |
+| `23h` | 3 |
 
-キーボード入力は SIO-B 側の読み出しを補助する形で実装されています。
+### 4.1 SIO-B: キーボード
 
-- `sio_reg == 2`: キーボードFIFOにデータがある場合、FIFOから1バイト返します。
-- `sio_reg == 3`: キーボードFIFOにデータがある場合、SIOステータスに ready bit 相当の `01h` を立てます。
+エミュレータのキーボード FIFO は SIO-B の読込みを補助します。
 
-## FDCポート詳細
+- SIO register 2: FIFO にデータがあれば 1 byte 返します。
+- SIO register 3: FIFO にデータがあれば ready bit `01h` を立てます。
+
+入力マッピングは ALPS AKB-3320 の日本語キー配列を意識した実装で、ASCII、制御文字、JIS X 0201 カナを扱います。
+
+### 4.2 SIO-A: 外部シリアル
+
+SIO-A は外部シリアルブリッジへ接続されています。
+
+選択可能な現行プリセットは次のとおりです。
+
+| serial type | 接続 |
+| ---: | --- |
+| 0 | off |
+| 1 | COM1, 9600 baud |
+| 2 | COM2, 9600 baud |
+| 3 | COM3, 9600 baud |
+| 4 | COM4, 9600 baud |
+| 5 | TCP listen 127.0.0.1:8023 |
+
+既定値は 0（off）です。
+
+## 5. FDC
 
 `2Ch-2Fh` は MB8877 FDC に接続されます。
 
-| CPUポート | FDC reg | 一般的な意味 | 備考 |
-|---:|---:|---|---|
-| `2Ch` | 0 | status / command | 読み出しはステータス、書き込みはコマンド。 |
-| `2Dh` | 1 | track | トラックレジスタ。 |
-| `2Eh` | 2 | sector | セクタレジスタ。 |
-| `2Fh` | 3 | data | データレジスタ。 |
+| Port | Register | 機能 |
+| ---: | ---: | --- |
+| `2Ch` | 0 | status / command |
+| `2Dh` | 1 | track |
+| `2Eh` | 2 | sector |
+| `2Fh` | 3 | data |
 
-FDCの DRQ は Z80DMA、IRQ はメインCPU IRQ へ接続されます。
+接続:
 
-## PIOポート詳細
+- FDC IRQ → main CPU IRQ
+- FDC IRQ → PIO-A bit 0
+- FDC DRQ → Z80 DMA READY
 
-PIOも SIO と同様に下位2ビットを入れ替えてから Z80PIO へ渡されます。
+2 台のドライブはいずれも 2D、300 rpm、FM として初期化されます。
+
+## 6. PIO
+
+PIO も SIO と同じレジスタ入替えを行います。
 
 ```text
 pio_reg = ((reg & 01h) << 1) | ((reg & 02h) >> 1)
 ```
 
-| CPUポート | `reg` | `pio_reg` | 備考 |
-|---:|---:|---:|---|
-| `30h` | 0 | 0 | Z80PIO 実装側のレジスタ0へ接続 |
-| `31h` | 1 | 2 | Z80PIO 実装側のレジスタ2へ接続 |
-| `32h` | 2 | 1 | Z80PIO 実装側のレジスタ1へ接続 |
-| `33h` | 3 | 3 | Z80PIO 実装側のレジスタ3へ接続 |
+| CPU port | PIO reg |
+| ---: | ---: |
+| `30h` | 0 |
+| `31h` | 2 |
+| `32h` | 1 |
+| `33h` | 3 |
 
-PIOのポートA/Bは `FLOPPY` デバイスへ接続されます。
+PIO-A / B は FLOPPY インターフェースへ接続されます。
 
-### PIO-A
+### 6.1 PIO-B
 
-| bit | 信号 | 備考 |
-|---:|---|---|
-| 0 | 未接続 | 実装では `0` 扱いです。 |
-| 6 | `DISK2 SENS` | FDC の side register へ反映されます。 |
-| その他 | 未整理 | 現実装では FDD制御に直接使っていません。 |
+| Bit | 用途 |
+| ---: | --- |
+| 0-1 | drive select |
+| 2 | drive 1 ready / motor condition |
+| 3 | drive 0 ready / motor condition |
+| 4-6 | 現行実装では未使用 |
+| 7 | ROMEN |
 
-### PIO-B
+## 7. MINSUB
 
-| bit | 信号 | 備考 |
-|---:|---|---|
-| 0-1 | drive select | `00b` drive 0、`01b` drive 1。 |
-| 2 | drive 1 ready/motor 条件 | drive 1 選択時の ready 判定に使います。 |
-| 3 | drive 0 ready/motor 条件 | drive 0 選択時の ready 判定に使います。 |
-| 4-6 | 未接続 | 実装ではマスクされます。 |
-| 7 | `ROMEN` | `1` でROM有効、`0` でRAM全域化。 |
+メイン CPU とサブ CPU の間には 1-byte データレジスタと状態 bit を持つブリッジがあります。
 
-## MINSUB ブリッジ
+### 7.1 メイン CPU 側
 
-`3Ch-3Fh` はメインCPUとサブCPUの通信ブリッジです。実装では `port & FCh == 3Ch` で選択されます。
+代表ポートは `3Ch` です。`3Ch-3Fh` が同じブリッジへデコードされます。
 
-### メインCPU側
+メイン CPU が書き込むと:
 
-| 操作 | 内容 |
-|---|---|
-| read | ステータスを返します。 |
-| write | 書き込んだ1バイトをサブCPU向けデータとして保持し、DR full を立てます。 |
+1. byte が `main_to_sub_data` に保存されます。
+2. `DR_FULL` が 1 になります。
 
-ステータスビット:
+メイン CPU が読み込むと status を返します。
 
-| bit | 名称 | 意味 |
-|---:|---|---|
-| 0 | `SUB_BUSY` | サブCPUが busy として通知している状態です。 |
-| 1 | `DR_FULL` | メインからサブへのデータレジスタが埋まっています。 |
+| Bit | 名称 | 意味 |
+| ---: | --- | --- |
+| 0 | `SUB_BUSY` | サブ CPU busy |
+| 1 | `DR_FULL` | main→sub data が未読 |
 
-## 付録A: サブCPUメモリマップ
+### 7.2 サブ CPU 側
 
-サブCPUも Z80 です。現実装では、サブROMとサブRAMのみをメモリ空間へ配置しています。表示用VRAMはサブCPUメモリへ直接マップされず、GDC経由で操作します。
+サブ CPU 側の代表ポートは `80h` です。
 
-| アドレス範囲 | サイズ | 内容 | R/W | 備考 |
-|---|---:|---|---|---|
-| `0000h-1FFFh` | 8KB | SUBCPU ROM | R | `SUBCPU.ROM` を読み込みます。未配置時は自己ジャンプ+HALT埋めの安全値になります。 |
-| `8000h-87FFh` | 2KB | サブRAM | R/W | サブCPU作業領域です。 |
-| その他 | - | 未接続 | - | 現実装では明示マップされていません。 |
+サブ CPU が読み込むと、データがある場合は 1 byte を返し、`DR_FULL` をクリアします。データがない場合は `00h` を返します。
 
-## 付録B: 表示メモリ
+サブ CPU が書き込む場合、bit 0 が `SUB_BUSY` として保持されます。
 
-表示メモリは `DISPLAY` が保持し、uPD7220 GDC へVRAMポインタとして接続されます。
+## 8. サブ CPU メモリマップ
 
-| 領域 | サイズ | 接続先 | 備考 |
-|---|---:|---|---|
-| TVRAM | `1000h` bytes | Character GDC | 文字コード/属性の格納領域です。 |
-| GVRAM plane 0 | `10000h` bytes | Graphics GDC | グラフィック面0。 |
-| GVRAM plane 1 | `10000h` bytes | Graphics GDC | グラフィック面1。 |
-| GVRAM plane 2 | `10000h` bytes | Graphics GDC | グラフィック面2。 |
-| FONT ROM buffer | `2000h` bytes | DISPLAY | `FONT.ROM` を読み込みます。CPUメモリ空間には直接見えません。 |
+| アドレス | サイズ | 内容 | R/W |
+| --- | ---: | --- | --- |
+| `0000h-1FFFh` | 8 KB | `SUBCPU.ROM` | R |
+| `8000h-87FFh` | 2 KB | sub RAM | R/W |
+| その他 | - | 未接続 | - |
 
-## 付録C: サブCPU I/Oポート
+`SUBCPU.ROM` がない場合、ROM バッファは `JP 0000h` と HALT を主体とする安全な初期内容になります。
 
-サブCPU側は `addr & 82h` の部分デコードで、文字GDC、グラフィックGDC、MINSUBブリッジへ振り分けます。このため、同じデバイスに複数のエイリアスポートがあります。
+## 9. サブ CPU I/O
 
-| 条件 | 主なポート例 | デバイス | レジスタ | R/W | 備考 |
-|---|---|---|---|---|---|
-| `(port & 82h) == 00h` | `00h`, `01h`, `04h`, `05h` ... | Character GDC | `port & 01h` | R/W | 文字表示用 uPD7220。 |
-| `(port & 82h) == 02h` | `02h`, `03h`, `06h`, `07h` ... | Graphics GDC | `port & 01h` | R/W | グラフィック表示用 uPD7220。 |
-| `(port & 82h) == 80h` | `80h`, `81h`, `84h`, `85h` ... | MINSUB bridge | bridge | R/W | メインCPUとの通信。 |
-| `(port & 82h) == 82h` | `82h`, `83h`, `86h`, `87h` ... | 未接続 | - | - | 読み出しは `FFh`。 |
+サブ CPU は `addr & 82h` で部分デコードします。
 
-### サブCPU側 MINSUB
+| 条件 | デバイス | GDC reg |
+| --- | --- | ---: |
+| `(port & 82h) == 00h` | Character GDC | `port & 01h` |
+| `(port & 82h) == 02h` | Graphics GDC | `port & 01h` |
+| `(port & 82h) == 80h` | MINSUB | - |
+| `(port & 82h) == 82h` | 未接続 | - |
 
-| 操作 | 内容 |
-|---|---|
-| read | メインCPUからのデータがあれば1バイト返し、DR full を下げます。データがなければ `00h` を返します。 |
-| write | bit 0 を `SUB_BUSY` として保持します。 |
+代表ポート:
 
-## 付録D: 割り込みと接続概要
+```text
+00h Character GDC parameter/status
+01h Character GDC command/data
+02h Graphics GDC parameter/status
+03h Graphics GDC command/data
+80h MINSUB
+```
 
-| 接続 | 内容 |
-|---|---|
-| CTC -> main CPU | メインCPU割り込み制御。 |
-| SIO -> main CPU | シリアル/キーボード系割り込み。 |
-| PIO -> main CPU | FDD制御系割り込み。 |
-| DMA -> main CPU | DMA割り込み。 |
-| FDC IRQ -> main CPU | FDC割り込み。 |
-| FDC DRQ -> DMA | FDCデータ要求。 |
-| Character GDC VSYNC -> sub CPU IRQ | 文字GDCのVSYNCをサブCPU IRQへ接続。 |
+部分デコードのため、これらには複数のエイリアスポートがあります。
 
-## 注意事項
+## 10. 表示メモリ
 
-- 本文書は現時点のエミュレータ実装から作成した早見表です。実機回路図の全信号を完全に転記したものではありません。
-- サブCPU側I/Oは部分デコードのため、代表ポート以外にも多数のエイリアスがあります。
-- `ROMEN`、FDC ready 条件、MINSUBステータスは、CP/M起動やBIOS実装に影響する重要点です。
+`DISPLAY` が保持する表示メモリは次のとおりです。
+
+| 領域 | サイズ | 接続 |
+| --- | ---: | --- |
+| TVRAM | 4096 bytes | Character GDC |
+| GVRAM plane 0 | 65536 bytes | Graphics GDC |
+| GVRAM plane 1 | 65536 bytes | Graphics GDC |
+| GVRAM plane 2 | 65536 bytes | Graphics GDC |
+| FONT buffer | 8192 bytes | `FONT.ROM` |
+
+`FONT.ROM` は CPU メモリ空間へ直接マップされません。`DISPLAY` がローカルファイルとして読み込み、文字描画時に参照します。
+
+ファイルを読み込めなかった場合、現行描画コードは文字パターンを 0 として扱うため、文字は表示されません。
+
+## 11. 割り込み接続
+
+| 接続元 | 接続先 |
+| --- | --- |
+| CTC | main CPU interrupt |
+| SIO | main CPU interrupt |
+| PIO | main CPU interrupt |
+| DMA | main CPU interrupt |
+| FDC IRQ | main CPU IRQ |
+| FDC IRQ | PIO-A bit 0 |
+| FDC DRQ | DMA READY |
+| Character GDC VSYNC | sub CPU IRQ |
+
+## 12. Debug ログ
+
+Debug ビルドでは、実装箇所に応じて次のログが生成されます。
+
+```text
+lynxz80_main.log
+lynxz80_bridge.log
+lynxz80_gdc_txt.log
+lynxz80_gdc_grph.log
+lynxz80_keyboard.log
+```
+
+I/O、MINSUB、GDC、キーボードの不具合解析に使用できます。
+
+## 13. 注意事項
+
+- この文書は実機回路図そのものではなく、現行エミュレータ実装の仕様書です。
+- サブ CPU I/O は部分デコードのためエイリアスポートがあります。
+- ROMEN、MINSUB、FDC ready 条件は CP/M 起動に直接影響します。
+- 実装と文書が異なる場合は、現在のソースコードを優先してください。
