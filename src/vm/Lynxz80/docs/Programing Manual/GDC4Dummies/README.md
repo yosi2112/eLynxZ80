@@ -1,112 +1,170 @@
-# サルでもわかる GDC 操作マニュアル
+# uPD7220 GDC Programming Guide
 
-uPD7220A 系 GDC を LynxZ80Sim の実装で操作するための入門メモ。原本は同じディレクトリ内の `gdc_manual_A4_page_*.png` で、本文書は検索用の索引と実装時の早見表を兼ねる。
+この文書は、eLynxZ80 に実装されている文字表示用 GDC とグラフィック表示用 GDC の I/O インターフェース、およびプログラムからの基本的な操作方法をまとめたものです。
 
-## 原本ページ
+同じディレクトリの `gdc_manual_A4_page_01.png` ～ `gdc_manual_A4_page_12.png` は、補助的な図解資料です。
 
-| Page | File | 主題 |
-|---:|---|---|
-| 1 | `gdc_manual_A4_page_01.png` | GDCとは何か、操作の全体像 |
-| 2 | `gdc_manual_A4_page_02.png` | I/Oポートの見方、`addr & 3` による入口分岐 |
-| 3 | `gdc_manual_A4_page_03.png` | 初期化の考え方 |
-| 4 | `gdc_manual_A4_page_04.png` | `RESET` / `SYNC` / `MASTER` / `START` 系 |
-| 5 | `gdc_manual_A4_page_05.png` | カーソル、VRAMアドレス、進行方向 |
-| 6 | `gdc_manual_A4_page_06.png` | `CSRW` / `VECTW` 系 |
-| 7 | `gdc_manual_A4_page_07.png` | VRAM書込 |
-| 8 | `gdc_manual_A4_page_08.png` | 図形・ベクタ描画 |
-| 9 | `gdc_manual_A4_page_09.png` | テキスト・パターン描画 |
-| 10 | `gdc_manual_A4_page_10.png` | ステータスとFIFO確認 |
-| 11 | `gdc_manual_A4_page_11.png` | よくある詰まりどころ |
-| 12 | `gdc_manual_A4_page_12.png` | 実装確認チェックリスト |
+## 1. 構成
 
-## 基本モデル
+eLynxZ80 はサブ CPU 側に 2 個の uPD7220 相当 GDC を接続しています。
 
-GDC は CPU がドットを直接 1 点ずつ管理する代わりに、CPU から受けたコマンド、パラメータ、VRAM位置、同期条件、描画命令を処理する表示制御デバイスである。
+| GDC | 用途 | VRAM |
+| --- | --- | --- |
+| Character GDC | 文字表示 | TVRAM 4096 bytes |
+| Graphics GDC | グラフィック表示 | 3 planes × 65536 bytes |
 
-この実装では、文字表示系とグラフィック表示系に uPD7220A 系 GDC が分かれている。
+GDC はサブ CPU の I/O 空間へ接続され、メイン CPU / CP/M 側からグラフィック GDC を操作する場合は MINSUB を介したサブ CPU のプロキシ処理を利用できます。
 
-- 文字表示系: 文字GDC、テキストRAM、キャラクタジェネレータを扱う。
-- グラフィック表示系: グラフィックGDC、グラフィックRAM制御、グラフィックRAM、ドットデータ出力を扱う。
-- サブCPU系: GDCへの指示と表示処理の管理を担い、メインCPU系とはブリッジ経由で連携する。
+## 2. サブ CPU I/O デコード
 
-## I/Oポートの見方
+サブ CPU 側では、I/O アドレスの一部だけをデコードします。
 
-この実装では下位 2 ビット、つまり `addr & 3` で役割を分ける。
+| 条件 | デバイス |
+| --- | --- |
+| `(port & 82h) == 00h` | Character GDC |
+| `(port & 82h) == 02h` | Graphics GDC |
+| `(port & 82h) == 80h` | MINSUB |
+| `(port & 82h) == 82h` | 未接続 |
 
-| `addr & 3` | 書くとき | 読むとき |
-|---:|---|---|
-| `0` | パラメータを書く | ステータスを読む |
-| `1` | コマンドを書く | FIFOデータを読む |
-| `2` | zoom値を直接書く | `0xff` |
-| `3` | ライトペン要求扱い | `0xff` |
+GDC へ渡されるレジスタ番号は `port & 01h` です。
 
-最も重要な作法は、コマンドを `+1` に書き、必要なパラメータを `+0` に続けて書くこと。
+したがって、代表的なポートは次のようになります。
+
+| Port | デバイス | Reg | 書込 | 読込 |
+| ---: | --- | ---: | --- | --- |
+| `00h` | Character GDC | 0 | parameter | status |
+| `01h` | Character GDC | 1 | command | FIFO data |
+| `02h` | Graphics GDC | 0 | parameter | status |
+| `03h` | Graphics GDC | 1 | command | FIFO data |
+
+部分デコードのため、`04h`～`07h` などにも同じデバイスのエイリアスがあります。通常は上表の代表ポートを使用してください。
+
+## 3. コマンド送出
+
+GDC への基本的な書込みは、コマンドを register 1、パラメータを register 0 へ送る形です。
+
+概念例:
 
 ```cpp
-write_io8(base + 1, CMD);     // コマンド
-write_io8(base + 0, PARAM0);  // パラメータ
-write_io8(base + 0, PARAM1);
-
-status = read_io8(base + 0);  // ステータス
-data   = read_io8(base + 1);  // FIFOデータ
+write_io8(command_port, command);
+write_io8(parameter_port, param0);
+write_io8(parameter_port, param1);
 ```
 
-注意点: 前コマンドが未完了のまま次コマンドを書くと、実装側で先に `process_cmd()` が走る。中途半端なコマンド列を放置しないこと。
+読込みは register 0 が status、register 1 が FIFO data です。
 
-## 操作の大きな流れ
+```cpp
+status = read_io8(status_port);
+data   = read_io8(data_port);
+```
 
-1. 初期化
-   - reset / sync / master-slave / start を整える。
-2. カーソル設定
-   - `CSRW` で VRAM 上の位置を指定する。
-   - `VECTW` で描画方向や進み方を指定する。
-3. 書く・描く
-   - `WRITE` で VRAM にデータを書く。
-   - `VECTE` / `TEXTE` で図形、文字、パターンを描く。
-4. 読む・確認
-   - status と data FIFO を読む。
-   - busy / FIFO 状態を見て、次のコマンド投入タイミングを判断する。
+コマンドごとに必要なパラメータ数が異なるため、未完了のコマンド列を残したまま次のコマンドを送らないでください。
 
-## 初期化で確認するもの
+## 4. 初期化の基本手順
 
-- `RESET`: GDC内部状態を初期化する。
-- `SYNC`: 画面同期、表示タイミング、水平/垂直パラメータを設定する。
-- `MASTER`: master/slave 関係を設定する。
-- `START`: 表示開始。
+一般的な初期化では、次の順序で GDC の状態を設定します。
 
-文字GDCとグラフィックGDCの双方が存在するため、どちらのGDCを初期化しているかをログで分離すると解析しやすい。
+1. RESET
+2. SYNC
+3. MASTER / SLAVE の設定
+4. 必要な表示パラメータの設定
+5. START
 
-## VRAM位置と描画
+eLynxZ80 には Character GDC と Graphics GDC の 2 個があるため、初期化対象を取り違えないようにしてください。
 
-GDCは現在位置、方向、描画モードを内部に持つ。CPU側からは次の順序で設定すると把握しやすい。
+## 5. VRAM アクセスと描画
 
-1. `CSRW` でカーソル位置を決める。
-2. `VECTW` で方向、長さ、パターンなどを決める。
-3. `WRITE`、`VECTE`、`TEXTE` などで実際の描画を行う。
+描画処理では、主に次のコマンド群を使用します。
 
-LynxZ80Sim の表示処理では、グラフィックRAMはプレーン単位で扱われ、最終的に RGB と同期信号へ変換される。
+- `CSRW`: current address / cursor position の設定
+- `VECTW`: ベクタ描画条件の設定
+- `WRITE`: VRAM データ書込み
+- `VECTE`: ベクタ描画実行
+- `TEXTE`: 文字・パターン描画実行
 
-## デバッグ観点
+基本的な流れは次のとおりです。
 
-- コマンドポートとパラメータポートを取り違えていないか。
-- コマンド投入後、必要パラメータ数をすべて書いているか。
-- busy状態を無視して次コマンドを投入していないか。
-- 文字GDCとグラフィックGDCのI/O範囲を取り違えていないか。
-- VRAMアドレスが画面範囲、または実装上のVRAM範囲を越えていないか。
-- 同期パラメータが未設定のまま描画だけ行っていないか。
+1. `CSRW` で対象 VRAM 位置を設定します。
+2. 必要に応じて `VECTW` で方向、長さ、描画条件を設定します。
+3. `WRITE`、`VECTE`、`TEXTE` などを実行します。
+4. status を確認し、FIFO / busy 状態に応じて次のコマンドを送ります。
 
-## 実装参照
+## 6. Graphics GDC の VRAM
+
+Graphics GDC には合計 192 KB の VRAM が接続されています。
+
+```text
+plane 0: 00000h-0FFFFh
+plane 1: 10000h-1FFFFh
+plane 2: 20000h-2FFFFh
+```
+
+各 plane は 65536 bytes です。
+
+`display.cpp` は GDC の状態と各 plane のデータを参照し、最終的な画面バッファへ変換します。
+
+## 7. CP/M からの Graphics GDC 操作
+
+`tool/lynxZ80/build/gvramtest/` の `GVRAMTST` は、CP/M 上から MINSUB 経由でサブ CPU に Graphics GDC 操作を依頼します。
+
+プロキシコマンドは次の形式です。
+
+```text
+ESC G C xx
+ESC G P xx
+```
+
+| 形式 | 機能 |
+| --- | --- |
+| `ESC G C xx` | Graphics GDC の command port へ 1 byte 書込み |
+| `ESC G P xx` | Graphics GDC の parameter port へ 1 byte 書込み |
+
+`xx` は `00`～`FF` の 2 桁 ASCII 16 進数です。
+
+現行の MAIN/SUB 通信経路には、汎用の byte-wide 戻りチャネルがないため、このプロキシは書込み側の GDC コマンド列を対象とします。
+
+## 8. デバッグ
+
+Debug ビルドでは GDC 操作を次のログへ記録します。
+
+```text
+lynxz80_gdc_txt.log
+lynxz80_gdc_grph.log
+```
+
+表示異常がある場合は、次を確認してください。
+
+- Character GDC / Graphics GDC のポートを取り違えていないか
+- command と parameter の書込み先を逆にしていないか
+- 必要なパラメータをすべて送っているか
+- GDC の busy / FIFO 状態を無視していないか
+- VRAM アドレスが有効範囲内か
+- SYNC / START などの初期化が完了しているか
+- CP/M から操作する場合、MINSUB と `SUBCPU.ROM` が正常に動作しているか
+
+## 9. 図解資料
+
+| Page | File | 主題 |
+| ---: | --- | --- |
+| 1 | `gdc_manual_A4_page_01.png` | GDC の概要 |
+| 2 | `gdc_manual_A4_page_02.png` | I/O |
+| 3 | `gdc_manual_A4_page_03.png` | 初期化 |
+| 4 | `gdc_manual_A4_page_04.png` | RESET / SYNC / MASTER / START |
+| 5 | `gdc_manual_A4_page_05.png` | カーソル / VRAM address |
+| 6 | `gdc_manual_A4_page_06.png` | CSRW / VECTW |
+| 7 | `gdc_manual_A4_page_07.png` | VRAM write |
+| 8 | `gdc_manual_A4_page_08.png` | vector drawing |
+| 9 | `gdc_manual_A4_page_09.png` | text / pattern drawing |
+| 10 | `gdc_manual_A4_page_10.png` | status / FIFO |
+| 11 | `gdc_manual_A4_page_11.png` | troubleshooting |
+| 12 | `gdc_manual_A4_page_12.png` | implementation checklist |
+
+![GDC manual page 1](gdc_manual_A4_page_01.png)
+
+## 10. 実装参照
 
 - `src/vm/Lynxz80/LynxZ80.cpp`
-  - サブCPU側I/Oから文字GDC/グラフィックGDCへ振り分ける。
 - `src/vm/Lynxz80/display.cpp`
-  - GDC状態とVRAM内容から画面バッファを生成する。
 - `src/vm/Lynxz80/display.h`
-  - 表示系の接続、テキストRAM、グラフィックRAM、GDC参照を保持する。
-
-## Markdown内画像参照
-
-![Page 1](gdc_manual_A4_page_01.png)
-
-以降のページは同じ命名規則で `gdc_manual_A4_page_02.png` から `gdc_manual_A4_page_12.png` までを参照する。
-
+- `tool/lynxZ80/build/subcpu/subcpurom.asm`
+- `tool/lynxZ80/build/gvramtest/GVRAMTST.ASM`
