@@ -49,7 +49,7 @@ src/win32/winmain.cpp
 | .NET `System.Drawing` | `build_fontrom.ps1` のフォント描画 |
 
 > [!IMPORTANT]
-> 現行スクリプトではツールの探索方法が統一されていません。`build_ipl_rom.ps1` と `build_cpm22_runtime.ps1` は既定値として開発環境固有の `E:\aswcurr\bin\...` を使用します。`build_subcpu_rom.ps1` は `asw.exe` / `p2bin.exe` を相対名のまま `Test-Path` するため、PATH 上にあるだけでは事前確認を通過しません。実行前に各スクリプトのパス条件を使用環境に合わせてください。
+> ROM / CP/M 用スクリプトは `asw.exe`、`p2bin.exe`、必要に応じて `git.exe` を PATH から検出します。`build_ipl_rom.ps1`、`build_subcpu_rom.ps1`、`build_cpm22_runtime.ps1`、`build_cpm22_env.ps1` では各ツールのパスを引数で明示指定することもできます。
 
 ## 3. 外部ファイル
 
@@ -87,14 +87,14 @@ tool/lynxZ80/build/font/KH-Dot-Dougenzaka-16.ttf
 
 | 生成物 | 既定の出力先 |
 | --- | --- |
-| `IPL.ROM` | `tool/lynxZ80/bin/IPL.ROM` |
-| `SUBCPU.ROM` | `src/vm/Lynxz80/build/SUBCPU.ROM` |
+| `IPL.ROM` | `tool/lynxZ80/bin/IPL.ROM` および `src/vm/Lynxz80/build/IPL.ROM` |
+| `SUBCPU.ROM` | `tool/lynxZ80/bin/SUBCPU.ROM` および `src/vm/Lynxz80/build/SUBCPU.ROM` |
 | `FONT.ROM` | `tool/lynxZ80/build/font/FONT.ROM` |
 | `CPM22_RUNTIME.BIN` | `tool/lynxZ80/bin/CPM22_RUNTIME.BIN` |
 | `CPM22_SYSTEM.2d` | `tool/lynxZ80/bin/CPM22_SYSTEM.2d` |
 
 > [!NOTE]
-> 出力先は現在、スクリプト間で完全には統一されていません。`ROMCPY.ps1` は `src/vm/Lynxz80/build/` にある `IPL.ROM` と `SUBCPU.ROM` を入力として扱います。詳細は [tool/lynxZ80/README.md](tool/lynxZ80/README.md) を参照してください。
+> `IPL.ROM` と `SUBCPU.ROM` は `tool/lynxZ80/bin/` に共通出力を持ち、互換用として `src/vm/Lynxz80/build/` にもコピーされます。`ROMCPY.ps1` は共通出力を優先し、互換配置をフォールバックとして利用します。
 
 ## 5. CP/M 2.2 システムディスク仕様
 
@@ -113,16 +113,17 @@ tool/lynxZ80/build/font/KH-Dot-Dougenzaka-16.ttf
 | ディレクトリエントリ | 128 |
 | DSM | 151 |
 | DRM | 127 |
+| EXM | 1 |
 
 この値は現行 `tool/lynxZ80/build/bios/bios.asm` の DPB と対応しています。
 
-## 6. 既知の不整合
+## 6. スクリプト互換性と補足
 
-現行ツリーには、開発途中のパス変更に追随していない補助スクリプトがあります。
+補助スクリプトは現行ディレクトリ構成へ更新されています。
 
-- `build_cpm22_env.ps1` は `build\util` および `build\bin\cpmutil` を参照しますが、現在のツリーではローカル CP/M ユーティリティのソースは `build/cpmutils/` にあります。
-- `build_cpm22_system_disk.ps1` は標準コマンドの入力先として `tool/lynxZ80/bin/cpmutils/` を参照します。
-- `diskeditor.ps1` は 77 tracks / 26 sectors / 128 bytes、1 KB block の旧ディスク形式を前提としており、現行の `CPM22_SYSTEM.2d` とは互換ではありません。
-- `ROMCPY.ps1` と `build_ipl_rom.ps1` では `IPL.ROM` の既定出力・入力ディレクトリが一致していません。
+- `build_cpm22_env.ps1` は `build/cpmutils/` を入力、`bin/cpmutils/` を出力として使用します。
+- `build_cpm22_system_disk.ps1` と `diskeditor.ps1` は、現行 `CPM22_SYSTEM.2d` の 40-cylinder / 2-sided / 2048-byte-block / EXM=1 形式を共通に扱います。
+- `diskeditor.ps1 -Format Legacy` を指定すると、従来の 77-track / 26-sector / 128-byte-sector / 1 KB block 形式も扱えます。
+- `ROMCPY.ps1` は x86 / x64 と Debug / Release / Both を選択でき、`FONT.ROM` も存在すれば同時に配置します。
 
-これらはマニュアル上で隠さず、現行コードの状態として記載しています。
+詳細は [tool/lynxZ80/README.md](tool/lynxZ80/README.md) を参照してください。
