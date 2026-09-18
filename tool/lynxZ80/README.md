@@ -30,9 +30,9 @@ tool/lynxZ80/build/bios/bios.asm
 既定値には開発環境固有のパスが含まれるため、通常は引数を指定して実行してください。
 
 ```powershell
-.\build_ipl_rom.ps1 \
-  -AswPath "C:\path\to\asw.exe" \
-  -P2BinPath "C:\path\to\p2bin.exe" \
+.\build_ipl_rom.ps1 `
+  -AswPath "C:\path\to\asw.exe" `
+  -P2BinPath "C:\path\to\p2bin.exe" `
   -EmulatorBinRoot "C:\path\to\vc++2017\bin"
 ```
 
@@ -63,7 +63,7 @@ src/vm/Lynxz80/build/SUBCPU.ROM
 
 ROM サイズは 8192 bytes です。
 
-このスクリプトは `asw.exe` と `p2bin.exe` を直接参照します。実行環境から正しく解決できるようにしてください。
+このスクリプトは `asw.exe` と `p2bin.exe` を相対名のまま `Test-Path` で確認します。PATH 上にあるだけでは事前確認を通過しないため、実行時のカレントディレクトリに両ファイルを置くか、スクリプト側のパス指定を使用環境に合わせて変更してください。
 
 ## 4. フォント ROM
 
@@ -157,7 +157,7 @@ bin/CPM22_SYSTEM.2d
 | --- | ---: |
 | シリンダ | 40 |
 | 面 | 2 |
-| セクタ / 面 / シリンダ | 16 |
+| 1 面あたりセクタ数 | 16 |
 | 物理セクタ | 256 bytes |
 | 総容量 | 327680 bytes |
 | システム予約 | 2 シリンダ |
@@ -231,7 +231,7 @@ ESC G P xx    Graphics GDC parameter byte
 
 現状のツール群は、開発途中のディレクトリ変更と個別スクリプトの更新時期が一致していない部分があります。特に次の点を確認してください。
 
-- AS / p2bin の指定方法がスクリプトごとに異なります。
+- AS / p2bin の指定方法がスクリプトごとに異なります。`build_subcpu_rom.ps1` は相対名を `Test-Path` するため、PATH 登録だけでは不足します。
 - CP/M ユーティリティのディレクトリ名が `cpmutil` / `cpmutils`、`build/util` / `build/cpmutils` で混在しています。
 - `IPL.ROM` の生成先と `ROMCPY.ps1` の入力先が一致していません。
 - `diskeditor.ps1` は旧ディスク形式用です。
