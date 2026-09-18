@@ -114,10 +114,10 @@ Current helper scripts are in `tool/lynxZ80/`.
 | `build_cpm22_env.ps1` | Prepare CP/M 2.2 sources and commands |
 | `build_cpm22_runtime.ps1` | Build `CPM22_RUNTIME.BIN` |
 | `build_cpm22_system_disk.ps1` | Build `CPM22_SYSTEM.2d` |
-| `ROMCPY.ps1` | Copy ROMs into Debug/Release output directories |
-| `diskeditor.ps1` | Edit the legacy CP/M disk-image format |
+| `ROMCPY.ps1` | Copy ROMs into x86/x64 Debug/Release output directories |
+| `diskeditor.ps1` | Edit current and legacy CP/M disk-image formats |
 
-Some scripts still contain developer-local paths or older directory assumptions. Read [tool/lynxZ80/README.md](tool/lynxZ80/README.md) before running them.
+ROM and CP/M scripts are aligned with the current directory layout and can locate AS/p2bin through PATH. See [tool/lynxZ80/README.md](tool/lynxZ80/README.md) for options, output locations, and compatibility modes.
 
 ## External Files
 
