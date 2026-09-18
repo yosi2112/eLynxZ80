@@ -1,8 +1,12 @@
+[CmdletBinding()]
+param(
+    [string]$AswPath,
+    [string]$P2BinPath
+)
+
 $ErrorActionPreference = 'Stop'
 
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$asw = 'E:\aswcurr\bin\asw.exe'
-$p2bin = 'E:\aswcurr\bin\p2bin.exe'
+$root = $PSScriptRoot
 $source = Join-Path $root 'build\cpm22_runtime\CPM22.ASM'
 $romBiosSource = Join-Path $root 'build\bios\bios.asm'
 $outDir = Join-Path $root 'bin'
@@ -11,11 +15,34 @@ $runtimeOut = Join-Path $outDir 'CPM22_RUNTIME.BIN'
 $runtimeImageSize = 8192
 $residentBiosWorkBase = 0xF900
 
-foreach($tool in @($asw, $p2bin)) {
-    if(!(Test-Path -LiteralPath $tool -PathType Leaf)) {
-        throw "Required tool not found: $tool"
+function Resolve-Executable {
+    param(
+        [string]$ExplicitPath,
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    if(-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        if(Test-Path -LiteralPath $ExplicitPath -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $ExplicitPath).Path
+        }
+        $explicitCommand = Get-Command -Name $ExplicitPath -CommandType Application -ErrorAction SilentlyContinue
+        if($null -ne $explicitCommand) {
+            return $explicitCommand.Source
+        }
+        throw "Required tool not found: $ExplicitPath"
     }
+
+    $command = Get-Command -Name $Name -CommandType Application -ErrorAction SilentlyContinue
+    if($null -eq $command) {
+        throw "Required tool not found in PATH: $Name"
+    }
+    return $command.Source
 }
+
+$asw = Resolve-Executable -ExplicitPath $AswPath -Name 'asw.exe'
+$p2bin = Resolve-Executable -ExplicitPath $P2BinPath -Name 'p2bin.exe'
+
 if(!(Test-Path -LiteralPath $source -PathType Leaf)) {
     throw "Z80 CP/M source not found: $source"
 }
