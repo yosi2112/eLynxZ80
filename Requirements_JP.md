@@ -49,7 +49,7 @@ src/win32/winmain.cpp
 | .NET `System.Drawing` | `build_fontrom.ps1` のフォント描画 |
 
 > [!IMPORTANT]
-> 現行スクリプトではツールの探索方法が統一されていません。`build_ipl_rom.ps1` と `build_cpm22_runtime.ps1` は既定値として開発環境固有の `E:\aswcurr\bin\...` を使用します。`build_subcpu_rom.ps1` は `asw.exe` / `p2bin.exe` を相対名のまま `Test-Path` するため、PATH 上にあるだけでは事前確認を通過しません。実行前に各スクリプトのパス条件を使用環境に合わせてください。
+> ROM / CP/M 用スクリプトは `asw.exe`、`p2bin.exe`、必要に応じて `git.exe` を PATH から検出します。`build_ipl_rom.ps1`、`build_subcpu_rom.ps1`、`build_cpm22_runtime.ps1`、`build_cpm22_env.ps1` では各ツールのパスを引数で明示指定することもできます。
 
 ## 3. 外部ファイル
 
