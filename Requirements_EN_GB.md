@@ -45,7 +45,7 @@ The PowerShell helper scripts use the following tools.
 | .NET `System.Drawing` | Render glyphs in `build_fontrom.ps1` |
 
 > [!IMPORTANT]
-> Tool lookup is not yet consistent across all scripts. `build_ipl_rom.ps1` and `build_cpm22_runtime.ps1` contain developer-local defaults under `E:\aswcurr\bin`, while other scripts refer directly to `asw.exe` and `p2bin.exe`. Review or override the paths before use.
+> ROM and CP/M scripts now locate `asw.exe`, `p2bin.exe`, and, where required, `git.exe` through PATH. `build_ipl_rom.ps1`, `build_subcpu_rom.ps1`, `build_cpm22_runtime.ps1`, and `build_cpm22_env.ps1` also accept explicit tool paths.
 
 ## 3. External Files
 
