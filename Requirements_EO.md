@@ -29,14 +29,16 @@ tool/lynxZ80/build/arch/cpm22-b.zip
 
 ```text
 tool/lynxZ80/bin/IPL.ROM
+tool/lynxZ80/bin/SUBCPU.ROM
+src/vm/Lynxz80/build/IPL.ROM
 src/vm/Lynxz80/build/SUBCPU.ROM
 tool/lynxZ80/build/font/FONT.ROM
 tool/lynxZ80/bin/CPM22_RUNTIME.BIN
 tool/lynxZ80/bin/CPM22_SYSTEM.2d
 ```
 
-## Grava noto
+## Kongrueco
 
-Iuj skriptoj ankoraŭ uzas malsamajn aŭ malnovajn dosierujojn. Precipe `diskeditor.ps1` celas pli malnovan diskformaton kaj ne kongruas kun la nuna `CPM22_SYSTEM.2d`.
+La helpaj skriptoj nun uzas la aktualan dosierujan aranĝon. `diskeditor.ps1` defaŭlte traktas la nunan `CPM22_SYSTEM.2d`-formaton; la malnova 77-traka formato restas disponebla per `-Format Legacy`. AS, p2bin kaj Git estas serĉataj per PATH, kun eblo eksplicite indiki iliajn vojojn en la koncernaj skriptoj.
 
 Vidu [tool/lynxZ80/README.md](tool/lynxZ80/README.md) por detaloj.
