@@ -58,7 +58,20 @@
  	JP	C,RANSIZ2
  	LD	(HL),E		;we found a larger (in size) extent.
  	DEC	HL		;stuff these values into fcb.
-@@ -3731,8 +3733,64 @@ READ:	JP	0
+@@ -3704,9 +3706,10 @@ FILEPOS:DEFW	0		;files position within directory (0 to max entries -1).
+ ;
+ CKSUMTBL: DEFB	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+ ;
+-;   Extra space ?
++;   Keep the BIOS jump table page aligned for direct BIOS calls.
++;   A negative DS count rejects a BDOS that grows past this boundary.
+ ;
+-	DEFB	0,0,0,0
++	DS	(MEM*1024)-600H-$
+ ;
+ ;**************************************************************
+ ;*
+@@ -3731,8 +3734,64 @@ READ:	JP	0
  WRITE:	JP	0
  PRSTAT:	JP	0
  SECTRN:	JP	0

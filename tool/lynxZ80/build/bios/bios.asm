@@ -22,15 +22,14 @@ CPM_IMAGE_SIZE      EQU     8192
 ; CP/M image is fixed at build time; calculate its 128-byte logical-sector
 ; count in the assembler instead of performing a boot-time division loop.
 CPM_LOAD_SECTORS    EQU     (CPM_IMAGE_SIZE+127)/128
-CPM_ENTRY_ADDR      EQU     0F202H
+CPM_ENTRY_ADDR      EQU     0F200H
 CPM_BOOT_ADDR       EQU     CPM_ENTRY_ADDR
 ; Keep this synchronized with the assembled CP/M WBOOT vector.  The CP/M
-; image currently places BOOT/WBOOT at F202H/F205H; pointing at F203H enters
-; the middle of the BOOT jump and makes warm boots execute invalid code.
-CPM_WBOOT_ADDR      EQU     0F205H
-; The BDOS entry is FBASE1, not the preceding FBASE jump table/data.
-; A vector to E406H enters the BDOS error table instead of its prologue.
-CPM_FBASE1_ADDR     EQU     0E413H
+; BOOT must be page aligned: programs derive CONST/CONIN from (0002H).
+CPM_WBOOT_ADDR      EQU     0F203H
+; Publish FBASE, the JP to FBASE1, as the lower boundary of resident BDOS.
+; Programs may place their stack immediately below the address at 0006H.
+CPM_BDOS_ADDR       EQU     0E408H
 
 ROM_CTRL_BOOT       EQU     088H
 ROM_CTRL_OFF        EQU     008H
@@ -310,7 +309,7 @@ IPL_PATCH_PAGE_ZERO:
         LD      (0001H),HL
         LD      A,0C3H
         LD      (0005H),A
-        LD      HL,CPM_FBASE1_ADDR
+        LD      HL,CPM_BDOS_ADDR
         LD      (0006H),HL
         RET
 
@@ -341,9 +340,52 @@ BIOS_BOOT:
 
 BIOS_WBOOT:
         IFDEF   RESIDENT_BIOS
+        ; Reload the CCP and its header after transients use its memory.
+        ; Keep the reload stack outside the region being restored.
+        DI
+        LD      SP,0FFFEH
+        XOR     A
+        LD      (CURRENT_DRIVE),A
+        LD      (CACHE_VALID),A
+        CALL    BIOS_HOME
+        LD      HL,1
+        LD      (CURRENT_SECTOR),HL
+        LD      HL,CPM_LOAD_ADDR
+        LD      (DMA_ADDR),HL
+        LD      B,(CPM_BDOS_ADDR-CPM_LOAD_ADDR+127)/128
+BIOS_WBOOT_RELOAD:
+        PUSH    BC
+        CALL    BIOS_READ
+        POP     BC
+        OR      A
+        JR      NZ,BIOS_WBOOT_RETRY
+        LD      HL,(DMA_ADDR)
+        LD      DE,128
+        ADD     HL,DE
+        LD      (DMA_ADDR),HL
+        LD      HL,(CURRENT_SECTOR)
+        INC     HL
+        LD      (CURRENT_SECTOR),HL
+        DJNZ    BIOS_WBOOT_RELOAD
+        LD      A,0C3H
+        LD      (0000H),A
+        LD      HL,CPM_WBOOT_ADDR
+        LD      (0001H),HL
+        LD      (0005H),A
+        LD      HL,CPM_BDOS_ADDR
+        LD      (0006H),HL
+        LD      HL,0080H
+        LD      (DMA_ADDR),HL
         LD      A,(0004H)
         LD      C,A
         JP      CPM_CBASE_ADDR+3
+BIOS_WBOOT_RETRY:
+        LD      HL,BIOS_WBOOT_ERROR
+        CALL    BIOS_PRINT_STRING
+        CALL    BIOS_CONIN
+        JR      BIOS_WBOOT
+BIOS_WBOOT_ERROR:
+        DEFB    'WBOOT: insert system disk in A: and press a key.',00DH,00AH,0
         ELSE
         JP      RESET
         ENDIF

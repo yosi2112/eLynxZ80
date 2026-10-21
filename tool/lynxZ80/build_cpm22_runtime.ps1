@@ -178,6 +178,27 @@ try {
     $wboot = Get-SymbolAddress -ListingPath $listing -SymbolName 'WBOOT'
     $coldBoot = Get-SymbolAddress -ListingPath $listing -SymbolName 'COLD_BOOT'
     $coldBootEnd = Get-SymbolAddress -ListingPath $listing -SymbolName 'COLD_BOOT_AREA_END'
+    if(($boot -band 0xff) -ne 0 -or $wboot -ne ($boot + 3)) {
+        throw ('BIOS jump table must start on a page boundary: BOOT={0:X4} WBOOT={1:X4}' -f $boot,$wboot)
+    }
+    # Check the public entry vectors against the actual assembled symbols.
+    # 0006H also bounds a transient's stack, so it must point to FBASE.
+    $romSourceText = Get-Content -LiteralPath $romBiosSource -Raw
+    foreach($entry in @(
+        @{ Name = 'CPM_ENTRY_ADDR'; Address = $boot },
+        @{ Name = 'CPM_WBOOT_ADDR'; Address = $wboot },
+        @{ Name = 'CPM_BDOS_ADDR'; Address = $fbase }
+    )) {
+        $pattern = '(?im)^' + $entry.Name + '\s+EQU\s+0([0-9A-F]+)H\s*$'
+        $match = [regex]::Match($romSourceText, $pattern)
+        if(!$match.Success -or [Convert]::ToInt32($match.Groups[1].Value, 16) -ne $entry.Address) {
+            throw ('IPL constant {0} must match assembled address {1:X4}' -f $entry.Name,$entry.Address)
+        }
+    }
+    $warmBootReloadEnd = $cbase + [int]([Math]::Ceiling(($fbase - $cbase) / 128.0) * 128)
+    if($warmBootReloadEnd -gt $boot) {
+        throw 'Warm-boot reload would overwrite the resident BIOS'
+    }
     $biosPatchSource = Join-Path $stage '__resident_bios_patch.asm'
     $biosPatchBin = Join-Path $stage '__resident_bios_patch.bin'
     $biosPatchObject = Join-Path $stage '__resident_bios_patch.p'
